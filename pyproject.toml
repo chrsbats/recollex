@@ -57,7 +57,7 @@ openvino = [
     "onnxruntime-openvino>=1.17",
 ]
 silicon = [
-    "onnxruntime-silicon>=1.17",
+    "onnxruntime-silicon>=1.16.3",
 ]
 
 [project.scripts]
