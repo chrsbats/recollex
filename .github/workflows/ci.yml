@@ -21,7 +21,7 @@ jobs:
             python-version: "3.13"
         include:
           - os: ubuntu-latest
-            extras: "dev,cpu"
+            extras: "dev,cpu,nlp"
           - os: macos-14
             extras: "silicon"
           - os: windows-latest

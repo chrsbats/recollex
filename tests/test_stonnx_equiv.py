@@ -1,9 +1,13 @@
-import pytest
+import importlib.util, pytest
+if importlib.util.find_spec("sentence_transformers") is None:
+    pytest.skip("sentence_transformers not installed", allow_module_level=True)
+
 import numpy as np
 from pathlib import Path
 
 from recollex.encoder.stonnx import SparseEncoderONNX
 from tests.conftest import MODEL_DIR  # reuse the same model dir constant
+
 from sentence_transformers import SparseEncoder as STSparseEncoder
 
 def _find_quant():

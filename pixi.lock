@@ -4054,7 +4054,7 @@ packages:
 - pypi: ./
   name: recollex-core
   version: 0.1.0
-  sha256: 32d12f8097504febe32065c9c432dbbaa596d7521413c61b9944049345f77f5d
+  sha256: cac6b4b5d0663c6a0132b7c56c6919c8fb9654b4b0044b290ccbd579ea32caf9
   requires_dist:
   - python-ulid>=3,<4
   - pyroaring>=1,<2
@@ -4064,13 +4064,13 @@ packages:
   - transformers>=4.36,<5
   - pytest>=8.0.0 ; extra == 'dev'
   - pytest-cov>=5.0.0 ; extra == 'dev'
-  - sentence-transformers[onnx]>=5.1,<6 ; extra == 'dev'
+  - sentence-transformers[onnx]>=5.1,<6 ; (python_full_version < '3.13' and sys_platform != 'darwin' and extra == 'nlp') or (python_full_version < '3.13' and platform_machine == 'arm64' and extra == 'nlp')
   - onnxruntime>=1.17 ; extra == 'cpu'
-  - onnxruntime-gpu>=1.17 ; extra == 'gpu'
-  - onnxruntime-rocm>=1.17 ; extra == 'rocm'
-  - onnxruntime-directml>=1.17 ; extra == 'directml'
-  - onnxruntime-openvino>=1.17 ; extra == 'openvino'
-  - onnxruntime-silicon>=1.16.3 ; extra == 'silicon'
+  - onnxruntime-gpu>=1.17 ; sys_platform in 'linux,win32' and extra == 'gpu'
+  - onnxruntime-rocm>=1.17 ; python_full_version < '3.13' and sys_platform == 'linux' and extra == 'rocm'
+  - onnxruntime-directml>=1.17 ; sys_platform == 'win32' and extra == 'directml'
+  - onnxruntime-openvino>=1.17 ; sys_platform == 'linux' and extra == 'openvino'
+  - onnxruntime-silicon==1.16.3 ; python_full_version < '3.12' and platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'silicon'
   requires_python: '>=3.10'
   editable: true
 - pypi: https://files.pythonhosted.org/packages/07/0f/ab5c1581e6563a7bffdc1974fb2d25f05689b88e2d416525271f232b1946/regex-2025.9.18-cp313-cp313-win_amd64.whl
