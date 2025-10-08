@@ -11,7 +11,7 @@ authors = [
   { name="Chris Bates", email="1314008+chrsbats@users.noreply.github.com" },
 ]
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "python-ulid>=3,<4",
     "pyroaring>=1,<2",
@@ -22,7 +22,6 @@ dependencies = [
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",

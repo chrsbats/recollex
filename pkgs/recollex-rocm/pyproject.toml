@@ -7,7 +7,7 @@ name = "recollex-rocm"
 version = "0.1.0"
 description = "ROCm meta-package for Recollex (depends on recollex-core + onnxruntime-rocm)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "recollex-core>=0.1.0",
     "onnxruntime-rocm>=1.17",

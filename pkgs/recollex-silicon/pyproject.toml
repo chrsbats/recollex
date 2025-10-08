@@ -7,7 +7,7 @@ name = "recollex-silicon"
 version = "0.1.0"
 description = "Apple Silicon meta-package for Recollex (depends on recollex-core + onnxruntime-silicon)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "recollex-core>=0.1.0",
     "onnxruntime-silicon>=1.17",
