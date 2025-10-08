@@ -5,27 +5,36 @@ channels = ["conda-forge"]
 platforms = ["linux-64", "osx-64", "win-64"]
 
 [environments]
-default = { features = ["dev"], solve-group = "default" }
+default = { features = ["dev", "cpu"], solve-group = "default" }
 
 [tool.pixi]
-resolver = "uv"                # still resolves PyPI deps with uv
+resolver = "uv"                
 
 # Pin Python
 [tool.pixi.system-requirements]
 python = "3.12"
 
-# Your package itself is still editable
-pypi-dependencies = { your-package-name = { path = ".", editable = true } }
-
-[dependencies]                 # conda-forge deps
+[dependencies]                 
 python = "3.12.*"
 numpy = "*"
 scipy = "*"
+
+[pypi-dependencies]            
+recollex-core = { path = ".", editable = true }
 
 [feature.dev.pypi-dependencies]
 ipython = ">=8,<9"
 pytest = "*"
 pytest-cov = "*"
+sentence-transformers = { version = ">=5.1,<6", extras = ["onnx"] }
+
+[feature.cpu.pypi-dependencies]
+onnxruntime = ">=1.17"
+
+[feature.gpu.pypi-dependencies]
+onnxruntime-gpu = ">=1.17"
 
 [tasks]
 test = "pytest -q"
+clean = "recollex-clean"
+prefetch = "recollex-prefetch"

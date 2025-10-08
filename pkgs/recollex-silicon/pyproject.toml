@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recollex-silicon"
+version = "0.1.0"
+description = "Apple Silicon meta-package for Recollex (depends on recollex-core + onnxruntime-silicon)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "recollex-core>=0.1.0",
+    "onnxruntime-silicon>=1.17",
+]
+
+[tool.setuptools]
+packages = []

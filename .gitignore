@@ -83,3 +83,5 @@ htmlcov/
 Thumbs.db
 
 .aider*
+models/
+archive/

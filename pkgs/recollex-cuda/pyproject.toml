@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recollex-cuda"
+version = "0.1.0"
+description = "CUDA meta-package for Recollex (depends on recollex-core + onnxruntime-gpu)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "recollex-core>=0.1.0",
+    "onnxruntime-gpu>=1.17",
+]
+
+[tool.setuptools]
+packages = []

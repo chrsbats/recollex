@@ -1,13 +1,17 @@
-# Recollex — Developer Guide
+# Recollex Developer Guide
 
 Sparse, filterable, RAM-friendly indexer for SPLADE-style vectors on Windows/Linux/macOS.
 
+See docs/code_style.md for the project’s preferred code style (function-first hooks; ABCs for stateful components).
+
 ## 1) Mental model
 
-* Store vectors as **CSR** triplets on disk. Slice rows. Dot with query.
-* Store filters as **Roaring bitmaps** inside **SQLite** BLOBs. Intersect fast.
-* Append in **segments**. Delete via **tombstone bitmap**. Compact later.
-* Everything is local. No DB server. Optional ANN is out of scope here.
+- Store vectors as **CSR** triplets on disk. Slice rows. Dot with query.
+- Store filters as **Roaring bitmaps** inside **SQLite** BLOBs. Intersect fast.
+- Append in **segments**. Delete via **tombstone bitmap**. Compact later.
+- Default encoder: SPLADE (prithivida/Splade_PP_en_v2) via sentence_transformers; optional ONNX Runtime (GPU) for the MLM forward. Pooling: ReLU → log(1+·) → reduce across tokens (max or sum). Use the same pooling for docs and queries.
+- Behavior profiles: paraphrase_hp (high precision), rag (high recall), log_recent (recency-first). Profiles select hook presets and runtime knobs.
+- Everything is local. No DB server. Optional ANN is out of scope here.
 
 ---
 
@@ -25,13 +29,16 @@ recollex/
 
 ### manifest.json
 
+dims is set at build time from the encoder tokenizer's vocab_size; you do not configure it manually.
+On open, if an encoder is present, the engine validates manifest.dims matches the encoder; otherwise it trusts the manifest.
+
 ```json
 {
   "version": 1,
-  "dims": 250000,
+  "dims": 30522,
   "segments": [
-    {"name":"seg_000","rows":[0,100000]},
-    {"name":"seg_001","rows":[100000,150000]}
+    { "name": "seg_000", "rows": [0, 100000] },
+    { "name": "seg_001", "rows": [100000, 150000] }
   ]
 }
 ```
@@ -46,16 +53,18 @@ CREATE TABLE IF NOT EXISTS docs(
   doc_id TEXT PRIMARY KEY,
   segment_id TEXT NOT NULL,
   row_offset INTEGER NOT NULL,
+  seq INTEGER NOT NULL,       -- global insertion order, monotonic
   text TEXT,
-  tags TEXT                  -- JSON string (arbitrary key/values)
+  tags TEXT                   -- JSON string (arbitrary key/values)
 );
 
 CREATE INDEX IF NOT EXISTS docs_seg_off ON docs(segment_id, row_offset);
+CREATE INDEX IF NOT EXISTS docs_seq ON docs(seq);
 
--- Bitmaps: serialized Roaring as BLOB
+-- Bitmaps: serialized Roaring as TEXT (BMFilter.serialize() latin-1 string)
 CREATE TABLE IF NOT EXISTS bitmaps(
   name TEXT PRIMARY KEY,     -- e.g. 'tag:user=u123', 'tag:tenant=acme', 'tombstones'
-  data BLOB NOT NULL,
+  data TEXT NOT NULL,        -- BMFilter.serialize()
   last_used INTEGER          -- unix time (for cache eviction heuristics)
 );
 
@@ -64,12 +73,18 @@ CREATE TABLE IF NOT EXISTS stats(
   key TEXT PRIMARY KEY,      -- e.g. 'term_df:12345'
   value INTEGER
 );
+
+-- Generic key/value for custom metadata (JSON as TEXT)
+CREATE TABLE IF NOT EXISTS kv(
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 ```
 
 **Conventions**
 
-* Bitmap keys: `tag:<k>=<v>`, `term:<tid>`, special `tombstones`.
-* Keep hot bitmaps cached in RAM. Update `last_used` on read.
+- Bitmap keys: `tag:<k>=<v>`, `term:<tid>`, special `tombstones`.
+- Keep hot bitmaps cached in RAM. Update `last_used` on read.
 
 ---
 
@@ -77,10 +92,10 @@ CREATE TABLE IF NOT EXISTS stats(
 
 Save CSR arrays per segment:
 
-* `indptr.npy : int64  | len=N+1`
-* `indices.npy: int32  | len=nnz`
-* `data.npy   : float32| len=nnz`
-* `row_ids.npy: bytes/utf8 or int64 | len=N`  (maps row→doc\_id)
+- `indptr.npy : int64  | len=N+1`
+- `indices.npy: int32  | len=nnz`
+- `data.npy   : float32| len=nnz`
+- `row_ids.npy: bytes/utf8 or int64 | len=N` (maps row→doc_id)
 
 Open for serving with:
 
@@ -91,6 +106,8 @@ data    = np.load("data.npy",    mmap_mode="r")
 X = csr_matrix((data, indices, indptr), shape=(N, D))   # zero-copy views
 ```
 
+- Keep CSR arrays on the filesystem (or fsspec); do not store them in the SQL DB. This remains true even if the metadata backend later uses Postgres.
+
 ---
 
 ## 5) Query algorithm (default)
@@ -99,121 +116,159 @@ Input: `q_terms=[(term_id, weight)]`, `filters={k:v}`, `k`, `budget`.
 
 1. **Base filter**
 
-   * Intersect tag bitmaps from `filters` → `B`.
-   * Subtract tombstones bitmap.
+   - Intersect tag bitmaps from `filters` → `B`.
+   - Subtract tombstones bitmap.
 
 2. **Adaptive term gating**
 
-   * Rank query terms by `weight × idf`.
-   * MUST = greedy AND until `|B ∩ MUST| ≤ budget` or min\_must reached.
-   * SHOULD = top-N remaining terms (OR).
-   * Candidates `C = (B ∩ MUST) ∩ OR(SHOULD)`.
+   - Rank query terms by `weight × idf`.
+   - MUST = greedy AND until `|B ∩ MUST| ≤ budget` or min_must reached.
+   - SHOULD = top-N remaining terms (OR).
+   - Candidates `C = (B ∩ MUST) ∩ OR(SHOULD)`.
 
 3. **Score**
 
-   * Group `C` by `segment_id`.
-   * For each segment: slice rows `X_seg[offsets]`; compute exact scores `q_csr @ X_seg[offsets].T`.
-   * Merge top-K across segments.
+   - Group `C` by `segment_id`.
+   - For each segment: slice rows `X_seg[offsets]`; compute exact scores `q_csr @ X_seg[offsets].T`.
+   - Merge top-K across segments.
 
 4. **Return**
 
-   * Attach `text`, `tags` from `docs`.
+   - Attach `text`, `tags` from `docs`.
 
 **Defaults**
 `budget=50_000`, `min_must=2`, `should_cap=100`, drop top 1–2% highest-DF terms.
 
+Profiles and knobs
+
+- paraphrase_hp (high precision):
+  - min_must: 3–5, should_cap: 16–32, df_drop_top_percent: 3–5, budget: 5k–10k
+  - Optional reranker over top 50–100 candidates.
+- rag (high recall):
+  - min_must: 0–1, should_cap: 100–300, df_drop_top_percent: 0.5–1, budget: 50k–150k
+- log_recent (recency-first):
+  - Candidates = base bitmap (after filters/tombstones); rank by docs.seq desc; ignore dot scores for ordering.
+
+Exclusions
+
+- Exclude specific doc_ids by subtracting a temporary bitmap of those ids from the base bitmap prior to candidate generation.
+
 ---
 
-## 6) Extensibility hooks
+## 6) Extensibility hooks (function-first)
 
-Use simple **function hooks**. Accept callables or dotted paths. Keep the core OSS, your advanced logic private.
+Hooks are plain callables you wire together. Pass a function directly or a dotted path; classes with **call** are also accepted and will be instantiated. Keep behavior pure; put state in ABC-backed components (see note below).
 
-### Hook registry
+SciPy (sparse CSR), PyRoaring (BitMap), and SPLADE encoder are required runtime dependencies; no fallbacks.
+
+### Function shapes (type aliases)
 
 ```python
-from typing import Protocol, Iterable, Tuple, Dict, Any, Callable, List
-import importlib
+from typing import Callable, Iterable, Tuple, Dict, Any, List, Optional
 
-def load_func(spec_or_fn):
-    if callable(spec_or_fn): return spec_or_fn
-    mod, _, name = spec_or_fn.rpartition('.')
-    return getattr(importlib.import_module(mod), name)
+# Shapes are for documentation/type-checking; no Protocols required.
+FilterFn = Callable[
+    [Iterable[Tuple[int, float]], Dict[str, str], Callable[[str], "Roaring"],
+     Callable[[int], int], "Roaring", Iterable[str], Dict[str, Any]],
+    "Roaring"
+]
 
-# ---------- Protocols ----------
-class FilterPolicy(Protocol):
-    def __call__(
-        self,
-        q_terms: Iterable[Tuple[int, float]],
-        base_bitmap: "Roaring",
-        df_lookup: Callable[[int], int],
-        budget: int,
-        min_must: int,
-        should_cap: int
-    ) -> Dict[str, Any]:  # {"must":[int], "should":[int], "exclude":[int]}
-        ...
+CandidateSupplierFn = Callable[
+    [Iterable[int], Iterable[int], "Roaring", Callable[[str], "Roaring"], int],
+    "Roaring"
+]
 
-class CandidateSupplier(Protocol):
-    def __call__(
-        self,
-        must_terms: Iterable[int],
-        should_terms: Iterable[int],
-        base_bitmap: "Roaring",
-        bitmap_get: Callable[[str], "Roaring"],
-        budget: int
-    ) -> "Roaring":  # candidate doc_id set
-        ...
+ScoreFn = Callable[
+    ["csr_matrix", "SegmentCSR", Iterable[int]],
+    List[Tuple[int, float]]  # [(row_offset, score)]
+]
 
-class ScoreHook(Protocol):
-    def __call__(
-        self,
-        q_terms: Iterable[Tuple[int, float]],
-        seg_view: "SegmentCSR",                  # exposes CSR arrays + row lookup
-        doc_offsets: Iterable[int],              # row indices in this segment
-        l2_normalized: bool = True
-    ) -> List[Tuple[int, float]]:                # [(row_offset, score)]
-        ...
+RankMergeFn = Callable[
+    [Dict[str, List[Tuple[int, float]]], int],
+    List[Tuple[str, int, float]]  # [(seg_id, row_offset, score)]
+]
 
-class RankMergeHook(Protocol):
-    def __call__(
-        self,
-        per_segment_results: Dict[str, List[Tuple[int, float]]],  # seg_id -> offsets/scores
-        k: int
-    ) -> List[Tuple[str, int, float]]:           # [(seg_id, row_offset, score)]
-        ...
-
-class EvictHook(Protocol):
-    def __call__(self, cache_stats: Dict[str, Any], bytes_to_free: int) -> List[str]: ...
+EvictFn = Callable[[Dict[str, Any], int], List[str]]
 ```
 
-### Default implementations
+### Default implementations (functions)
 
-* **filter\_policy\_default**: greedy MUST growth by measured Δcardinality; SHOULD = next top-weight terms.
-* **candidate\_supplier\_default**: `C = base ∩ AND(MUST) ∩ OR(SHOULD)` using Roaring fast ops.
-* **score\_csr\_slice**: build `X_top = X[offsets]`, `scores = (q_csr @ X_top.T).A1`.
-* **score\_accumulator**: overlap accumulation over postings for tiny `|C|`.
-* **rank\_merge\_heap**: k-way heap merge of per-segment results.
-* **evict\_lru**: evict least-recently-used bitmaps from RAM.
+- **filter_policy_default**: greedy MUST growth by measured Δcardinality; SHOULD = next top-weight terms.
+- **candidate_supplier_default**: `C = base ∩ AND(MUST) ∩ OR(SHOULD)` using Roaring fast ops.
+- **score_csr_slice**: assume q_csr is a 1×D SciPy CSR; build `X_top = X[offsets]`, `scores = (q_csr @ X_top.T).A1`.
+- **score_accumulator**: overlap accumulation over postings for tiny `|C|`.
+- **rank_merge_heap**: k-way heap merge of per-segment results.
+- **evict_lru**: evict least-recently-used bitmaps from RAM.
+- **filter_policy_paraphrase_hp**: greedy MUST growth tuned for high precision; small SHOULD set.
+- **filter_policy_rag**: minimal MUST; larger SHOULD for high recall.
+- **filter_policy_recent**: bypass term gating; use base bitmap only.
+- **candidate_supplier_recent**: returns base (minus tombstones/exclusions), capped by budget.
+- **score_hook_noop**: no-op scorer (score=0.0), for recent-mode ranking-by-seq.
+- **rank_merge_recent**: sort candidates by docs.seq desc across segments.
 
 ### Wiring
 
 ```python
+from recollex.hooks import (
+    filter_policy_default,
+    candidate_supplier_default,
+    score_csr_slice,
+    rank_merge_heap,
+    evict_lru,
+)
+from recollex.utils import resolve_hooks
+
+# Code-first config (no YAML)
+hook_specs = {
+    "filter_policy": filter_policy_default,            # function
+    "candidate_supplier": candidate_supplier_default,  # function
+    "score_hook": score_csr_slice,                     # function
+    "rank_merge": rank_merge_heap,                     # function
+    "evict": evict_lru,                                # function
+    # You can also put classes/instances or dotted paths here if desired.
+    # "score_hook": "recollex.hooks.score_csr_slice",
+    # "custom": MyCallableClass,
+    # "custom2": MyCallableInstance,
+}
+
+# Optional per-hook ctor kwargs for class specs
+ctor_kwargs = {
+    # "custom": {"arg": 123},
+}
+
+hooks = resolve_hooks(hook_specs, ctor_kwargs)
+
 class Recollex:
-    def __init__(self, cfg):
-        self.filter_policy = load_func(cfg["hooks"]["filter_policy"])
-        self.candidate_supplier = load_func(cfg["hooks"]["candidate_supplier"])
-        self.score_hook = load_func(cfg["hooks"]["score_hook"])
-        self.rank_merge = load_func(cfg["hooks"]["rank_merge"])
-        self.evict = load_func(cfg["hooks"]["evict"])
+    def __init__(self):
+        self.filter_fn = hooks["filter_policy"]
+        self.candidate_supplier = hooks["candidate_supplier"]
+        self.score_fn = hooks["score_hook"]
+        self.rank_merge = hooks["rank_merge"]
+        self.evict_fn = hooks["evict"]
 ```
 
 **Private extensions**
-Ship proprietary hooks as a private wheel and reference via dotted path:
+Ship proprietary hooks as functions (or classes with **call**) in a private wheel and reference via dotted path:
 
 ```yaml
 hooks:
   filter_policy: "recollector_pro.belief.filter_policy_v2"
-  score_hook:    "recollector_pro.scoring.coref_aware"
+  score_hook: "recollector_pro.scoring.coref_aware"
 ```
+
+### Stateful components use ABCs
+
+Use abstract base classes for lifecycle/state:
+
+- MetadataStore (docs/bitmaps/stats/kv; transactions, caches)
+- SegmentReader (CSR arrays, row lookups)
+- Encoder (SPLADE wrapper; dims; close)
+
+See recollex/abcs.py for the ABC definitions of MetadataStore and SegmentReader.
+
+These hold state and can be dataclasses. Behavior remains pure and injected via functions.
+
+See also: docs/code_style.md for the project’s code style and philosophy.
 
 ---
 
@@ -221,13 +276,20 @@ hooks:
 
 ```yaml
 index_path: ./recollex
-dims: 250000
+# dims derives from the encoder tokenizer; do not configure
+
+encoder:
+  model: "prithivida/Splade_PP_en_v2"
+  onnx: false # set true to use onnxruntime
+  pooling: "max" # "max" or "sum" (must match for docs/queries)
 
 runtime:
+  profile: "rag" # "paraphrase_hp" | "rag" | "log_recent"
   budget: 50000
-  min_must: 2
+  min_must: 1
   should_cap: 100
   df_drop_top_percent: 1
+  exclude_doc_ids: [] # optional per-call parameter takes precedence
 
 hooks:
   filter_policy: "recollex.hooks.filter_policy_default"
@@ -235,6 +297,11 @@ hooks:
   score_hook: "recollex.hooks.score_csr_slice"
   rank_merge: "recollex.hooks.rank_merge_heap"
   evict: "recollex.hooks.evict_lru"
+
+reranker:
+  enabled: false
+  model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_m: 0 # number of candidates to rerank (0 disables)
 
 cache:
   bitmap_ram_mb: 512
@@ -249,10 +316,11 @@ cache:
 
 **Append** new docs to an active in-RAM buffer. When buffer hits N docs:
 
+0. Assign a monotonically increasing seq to each new doc at add-time (global insertion order).
 1. Write `indptr/indices/data/row_ids` to `segments/seg_XXX/`.
 2. `fsync`.
 3. Write `manifest.tmp` then atomic `rename → manifest.json`.
-4. Upsert bitmaps in SQLite inside a transaction.
+4. Upsert docs (including seq), bitmaps, and stats/kv inside a single SQL transaction.
 
 **Tombstone**
 Add `doc_id` to `bitmaps['tombstones']` (replace row with new BLOB). Queries subtract it.
@@ -264,19 +332,30 @@ Pick segments with `dead_ratio > threshold`. Rebuild a fresh segment with live r
 
 ## 9) Concurrency and crash safety
 
-* Readers open segment `.npy` with `mmap_mode="r"`.
-* Only the indexer writes. Use SQLite transactions for `docs/bitmaps`.
-* Manifest swap is atomic `rename`. Never edit in place.
-* Bitmap updates: write a **new** BLOB row, then `UPDATE` pointer in one transaction.
+- Readers open segment `.npy` with `mmap_mode="r"`.
+- Only the indexer writes. Use SQLite transactions for `docs/bitmaps`.
+- Manifest swap is atomic `rename`. Never edit in place.
+- Bitmap updates: write a **new** BLOB row, then `UPDATE` pointer in one transaction.
+- Metadata backend is SQLite by default. If you later adopt SQLAlchemy/Postgres, keep CSR segments as files; only docs/bitmaps/stats/kv move to the new backend.
+
+---
+
+## 9.1) Backends (metadata)
+
+- Default: SQLite (direct). Tables: docs, bitmaps, stats, kv.
+- Optional (future): SQLAlchemy Core backend for SQLite/Postgres using the same schema.
+- Keep CSR segments as files (local FS or fsspec). Do not store CSR in the DB.
+- Optional adapters (e.g., Etcher) can implement the same metadata interfaces without changing the core engine.
 
 ---
 
 ## 10) Performance targets (defaults)
 
-* nnz/doc ≈ 200, `float32` → \~1.6 KB/doc for CSR.
-* `budget=50k` keeps slice small.
-* p95 retrieve+score (k=100) on RAM-resident segments: 5–20 ms.
-* Very small candidate sets: `score_accumulator` beats slicing.
+- nnz/doc ≈ 200, `float32` → \~1.6 KB/doc for CSR.
+- `budget=50k` keeps slice small.
+- p95 retrieve+score (k=100) on RAM-resident segments: 5–20 ms.
+- Very small candidate sets: `score_accumulator` beats slicing.
+- SPLADE sparse dot scores differ from dense cosine/IP; avoid fixed absolute cutoffs unless calibrated. Profiles should control gating instead.
 
 ---
 
@@ -290,11 +369,18 @@ engine.tombstone(doc_ids)          # logical delete
 engine.compact(threshold=0.2)      # offline maintenance
 
 results = engine.search(
-  q_terms=[(tid, wt), ...],
+  q_terms=[(tid, wt), ...],                # empty list allowed for log_recent
   filters={"tenant":"acme","user":"u123"},
-  k=50
+  k=50,
+  profile="rag",                           # "paraphrase_hp" | "rag" | "log_recent"
+  exclude_doc_ids=[],                      # optional exclusions
+  rerank_top_m=None                        # overrides config if not None
 )
-# -> [{"doc_id":..., "score":..., "segment_id":"seg_000","row_offset":1234, "tags":{...}, "text":"..."}]
+# -> [{"doc_id":..., "score":..., "segment_id":"seg_000","row_offset":1234, "tags":{...}, "text":"...", "seq": 123456}]
+
+# Convenience for recency-first:
+recent = engine.last(filters={"tenant":"acme","user":"u123"}, k=50)
+# equivalent to search(..., q_terms=[], profile="log_recent")
 ```
 
 ---
@@ -314,27 +400,34 @@ recollex compact PATH --threshold 0.2
 
 ## 13) Testing
 
-* **Correctness**: for a small corpus, compare scores to brute-force dense dot over densified rows.
-* **Filter logic**: unit tests for bitmap Δcardinality and MUST/SHOULD policy.
-* **Crash safety**: kill during seal; verify manifest+segments reopen.
-* **Windows**: tests for `np.load(..., mmap_mode="r")` and `rename()` swaps.
+- **Correctness**: for a small corpus, compare scores to brute-force dense dot over densified rows.
+- **Filter logic**: unit tests for bitmap Δcardinality and MUST/SHOULD policy.
+- **Crash safety**: kill during seal; verify manifest+segments reopen.
+- **Windows**: tests for `np.load(..., mmap_mode="r")` and `rename()` swaps.
 
 ---
 
-## 14) Optional modules (OSS examples)
+## 14) Optional modules
 
-* `hooks/filter_policy_default.py`
-* `hooks/score_csr_slice.py`
-* `hooks/score_accumulator.py`  (Numba/Cython variant)
-* `io/bitmap_sqlite.py`         (encode/decode Roaring BLOBs)
-* `io/segments.py`              (open/close segments, maps)
-* `eval/bench.py`               (latency and recall harness)
+- `hooks/filter_policy_default.py`
+- `hooks/score_csr_slice.py`
+- `hooks/score_accumulator.py` (Numba/Cython variant)
+- `io/bitmap_sqlite.py` (encode/decode Roaring BLOBs)
+- `io/segments.py` (open/close segments, maps)
+- `eval/bench.py` (latency and recall harness)
+- `hooks/filter_policy_paraphrase_hp.py`
+- `hooks/filter_policy_rag.py`
+- `hooks/filter_policy_recent.py`
+- `hooks/candidate_supplier_recent.py`
+- `hooks/score_hook_noop.py`
+- `hooks/rank_merge_recent.py`
+- `encoder/splade_pp_v2.py` # SPLADE wrapper (Torch/ONNX, pooling)
 
 ---
 
-## 15) What stays generic in OSS
+## 15) What stays generic
 
-* `tags` are unopinionated. they could be any unique identifier
-* Hooks are thin and documented. Your private belief/coref/scoring lives behind them.
+- `tags` are unopinionated. they could be any unique identifier
+- Hooks are thin and documented. Your private belief/coref/scoring lives behind them.
 
 This is the full surface new developers need: storage, query path, schemas, and hook points to extend behavior without touching the core.
