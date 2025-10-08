@@ -7,7 +7,7 @@ try:
     import onnxruntime as ort  # type: ignore
 except Exception:  # pragma: no cover
     ort = None
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer  # type: ignore
 
 class SparseEncoderONNX:
     """

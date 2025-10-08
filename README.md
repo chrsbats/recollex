@@ -10,29 +10,68 @@ What it does
 - Supports recency-first ranking profile.
 - Uses an opensource, quantized version of splade++ model via the Onnx runtime (no torch install required) (a non-quantized version also available)
 
-## Install
+---
 
-- CPU (default): pip install recollex
-- CUDA (NVIDIA): pip install recollex-cuda
-- ROCm (AMD): pip install recollex-rocm
-- DirectML (Windows): pip install recollex-directml
-- Apple Silicon (macOS arm64): pip install recollex-silicon
-- Note: install only one ONNX Runtime provider wheel per environment.
+## Installation
 
-## Development install
+Choose the package that matches your hardware.
+Each build includes its own optimized ONNX Runtime provider — install **only one** variant per environment.
 
-- Using Pixi:
-  - pixi install
-  - pixi run prefetch (auto-selects ONNX precision: int8/fp16/fp32 and downloads to local directory)
-  - pixi run clean (deletes the model from local directory)
-  - pixi run prefetch --quant=fp16 (manually select the quant size)
-  - pixi run clean --quant=fp16 (manually select the quant size)
-- Using Pip and CLI:
-  - pip install -e ".[cpu]" # or [gpu], [rocm], [directml], [silicon]
-  - recollex-prefetch (auto)
-  - recollex-prefetch --quant=fp16 (or int8, fp32)
-  - recollex-clean
-  - recollex-clean --quant=fp16
+| Platform                    | Package             | Command                         |
+| --------------------------- | ------------------- | ------------------------------- |
+| CPU (default)               | `recollex`          | `pip install recollex`          |
+| NVIDIA CUDA                 | `recollex-cuda`     | `pip install recollex-cuda`     |
+| AMD ROCm                    | `recollex-rocm`     | `pip install recollex-rocm`     |
+| Windows DirectML            | `recollex-directml` | `pip install recollex-directml` |
+| Apple Silicon (macOS arm64) | `recollex-silicon`  | `pip install recollex-silicon`  |
+
+> Install **only one** ONNX Runtime variant per environment.
+
+---
+
+## Development Setup
+
+### Using Pixi (recommended)
+
+```bash
+# Optional: remove existing Pixi environments
+pixi clean
+
+# Install the default CPU environment
+pixi install
+
+# Or install a hardware-accelerated environment
+pixi install -e cuda       # NVIDIA
+pixi install -e rocm       # AMD
+pixi install -e directml   # Windows
+pixi install -e silicon    # Apple Silicon
+
+# Run utility tasks
+pixi run prefetch                # auto-detects model precision (int8/fp16/fp32)
+pixi run test                    # run tests
+pixi run clean                   # remove downloaded models
+
+# Manual quantization control
+pixi run prefetch --quant=fp16
+pixi run clean --quant=fp16
+```
+
+---
+
+### Using Pip (for local development or CI)
+
+```bash
+# Install the editable package for your variant
+pip install -e .                 # assumes current variant (e.g. recollex-cuda)
+# or, if building from the meta-repo:
+# pip install -e ".[cpu]"  # or [gpu], [rocm], [directml], [silicon]
+
+# Run the CLI utilities
+recollex-prefetch                # auto precision
+recollex-prefetch --quant=fp16   # manual precision
+recollex-clean
+recollex-clean --quant=fp16
+```
 
 ## Quickstart (really simple)
 

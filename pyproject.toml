@@ -17,7 +17,8 @@ dependencies = [
     "pyroaring>=1,<2",
     "huggingface_hub>=0.23",
     "numpy>=2.0",
-    "scipy>=1.14"
+    "scipy>=1.14",
+    "transformers>=4.36,<5",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -37,27 +38,40 @@ include = ["recollex*"]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=5.0.0",
-    "sentence-transformers[onnx]>=5.1,<6",
+  "pytest>=8.0.0",
+  "pytest-cov>=5.0.0",
 ]
+
+nlp = [
+  # torch required by sentence-transformers; cap where wheels exist
+  "sentence-transformers[onnx]>=5.1,<6; python_version<'3.13' and (sys_platform!='darwin' or platform_machine=='arm64')",
+]
+
 cpu = [
-    "onnxruntime>=1.17",
+  "onnxruntime>=1.17",
 ]
+
 gpu = [
-    "onnxruntime-gpu>=1.17",
+  # CUDA wheels exist on Linux/Windows; adjust if needed
+  "onnxruntime-gpu>=1.17; sys_platform in 'linux,win32'",
 ]
+
 rocm = [
-    "onnxruntime-rocm>=1.17",
+  # ROCm wheels limited; avoid Py3.13; Linux only
+  "onnxruntime-rocm>=1.17; sys_platform=='linux' and python_version<'3.13'",
 ]
+
 directml = [
-    "onnxruntime-directml>=1.17",
+  "onnxruntime-directml>=1.17; sys_platform=='win32'",
 ]
+
 openvino = [
-    "onnxruntime-openvino>=1.17",
+  "onnxruntime-openvino>=1.17; sys_platform=='linux'",
 ]
+
 silicon = [
-    "onnxruntime-silicon>=1.16.3",
+  # Silicon wheels are macOS 14+ arm64 and ≤ Py3.11 for 1.16.3
+  "onnxruntime-silicon==1.16.3; sys_platform=='darwin' and platform_machine=='arm64' and python_version<'3.12'",
 ]
 
 [project.scripts]
