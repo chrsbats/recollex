@@ -50,11 +50,11 @@ pixi install
 pixi install -e dev
 
 # For a hardware-acceleration use the feature flags
-pixi install -e cuda       # NVIDIA 
+pixi install -e cuda       # NVIDIA
 pixi install -e directml   # Windows NVIDIA / AMD
-pixi install -e silicon    # Apple Silicon
-
 ```
+
+**Note:** Silicon and ROCm require PyPI installs. They are not available via the shared Pixi lock due to versioning conflicts.
 
 #### Scripts
 

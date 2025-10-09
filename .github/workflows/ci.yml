@@ -26,6 +26,9 @@ jobs:
             extras: "silicon"
           - os: windows-latest
             extras: "cpu"
+          - os: windows-latest
+            python-version: "3.11"
+            extras: "directml"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

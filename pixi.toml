@@ -12,8 +12,9 @@ default  = { features = ["cpu"], solve-group = "cpu"}
 dev      = { features = ["cpu","dev"], solve-group = "cpu" }  
 nlp      = { features = ["cpu","dev","nlp"], solve-group = "nlp" } 
 cuda     = { features = ["cuda"], solve-group = "cuda" } 
+#rocm     = { features = ["rocm"], solve-group = "rocm" } 
 directml = { features = ["directml"], solve-group = "directml" } 
-silicon  = { features = ["silicon"], solve-group = "silicon" }
+#silicon  = { features = ["silicon"], solve-group = "silicon" }
 
 [dependencies]
 python = ">=3.10,<3.14"
@@ -49,9 +50,9 @@ pypi-dependencies = { onnxruntime-gpu = ">=1.17" }
 platforms = ["win-64"]
 pypi-dependencies = { onnxruntime-directml = ">=1.17" }
 
-[feature.silicon]
-platforms = ["osx-arm64"]
-dependencies = { python = ">=3.10,<3.12" }
+# [feature.silicon]
+# platforms = ["osx-arm64"]
+# dependencies = { python = ">=3.10,<3.12" }
 
 [feature.silicon.pypi-dependencies] 
 recollex-gpu = { path = ".", editable = true, extras = ["silicon"] }
