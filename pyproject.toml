@@ -30,9 +30,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[tool.uv] 
-manylinux = "2_35"
-
 [tool.setuptools]
 include-package-data = true
 

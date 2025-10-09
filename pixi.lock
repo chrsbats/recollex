@@ -4348,7 +4348,7 @@ packages:
 - pypi: ./
   name: recollex-gpu
   version: 0.1.0
-  sha256: c94712c4466dd373a87fb947ff02a3e427b86ded4734badc8a20e421494ff85c
+  sha256: da39a4c5db5ca500ff2c774eeae51fc476180d0e57a149bdf5c2e13f010a3dad
   requires_dist:
   - python-ulid>=3,<4
   - pyroaring>=1,<2
@@ -4362,7 +4362,7 @@ packages:
   - onnxruntime>=1.17 ; extra == 'cpu'
   - onnxruntime-gpu>=1.17 ; (sys_platform == 'linux' and extra == 'gpu') or (sys_platform == 'win32' and extra == 'gpu')
   - onnxruntime-gpu>=1.17 ; (sys_platform == 'linux' and extra == 'cuda') or (sys_platform == 'win32' and extra == 'cuda')
-  - onnxruntime-rocm>=1.17 ; python_full_version < '3.13' and sys_platform == 'linux' and extra == 'rocm'
+  - onnxruntime-rocm==1.22.2.post1 ; python_full_version == '3.10.*' and sys_platform == 'linux' and extra == 'rocm'
   - onnxruntime-directml>=1.17 ; sys_platform == 'win32' and extra == 'directml'
   - onnxruntime-silicon==1.16.3 ; python_full_version < '3.12' and platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'silicon'
   requires_python: '>=3.10'

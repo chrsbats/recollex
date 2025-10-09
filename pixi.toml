@@ -54,8 +54,8 @@ pypi-dependencies = { onnxruntime-directml = ">=1.17" }
 # platforms = ["osx-arm64"]
 # dependencies = { python = ">=3.10,<3.12" }
 
-[feature.silicon.pypi-dependencies] 
-recollex-gpu = { path = ".", editable = true, extras = ["silicon"] }
+# [feature.silicon.pypi-dependencies] 
+# recollex-gpu = { path = ".", editable = true, extras = ["silicon"] }
  
 [tasks]
 test = "pytest -q"
