@@ -5,13 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "recollex"
 version = "0.1.0"
-description = "CPU meta-package for Recollex (depends on recollex-core + onnxruntime)"
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-    "recollex-core>=0.1.0",
-    "onnxruntime>=1.17",
-]
+dependencies = ["recollex-gpu[cpu]"]
 
 [tool.setuptools]
 packages = []

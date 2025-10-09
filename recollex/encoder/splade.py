@@ -35,7 +35,6 @@ def _installed_ort_flavor() -> Optional[str]:
         "onnxruntime-gpu",
         "onnxruntime-directml",
         "onnxruntime-rocm",
-        "onnxruntime-openvino",
         "onnxruntime-silicon",
         "onnxruntime",
     ]
@@ -60,7 +59,6 @@ def _has_accel_provider() -> bool:
         "CUDAExecutionProvider",
         "DmlExecutionProvider",
         "ROCMExecutionProvider",
-        "OpenVINOExecutionProvider",
         "CoreMLExecutionProvider",
     }
     return bool(providers.intersection(accel))
@@ -73,7 +71,7 @@ def _default_providers() -> list[str]:
     except Exception:
         return ["CPUExecutionProvider"]
     ordered = []
-    for p in ("CUDAExecutionProvider","ROCMExecutionProvider","DmlExecutionProvider","OpenVINOExecutionProvider","CoreMLExecutionProvider","CPUExecutionProvider"):
+    for p in ("CUDAExecutionProvider","ROCMExecutionProvider","DmlExecutionProvider","CoreMLExecutionProvider","CPUExecutionProvider"):
         if p in provs:
             ordered.append(p)
     return ordered or ["CPUExecutionProvider"]
@@ -128,7 +126,7 @@ class SpladeEncoder:
             if se is None:
                 if backend == "onnx":
                     if ort is None:
-                        raise RuntimeError("onnxruntime is not installed. Pick an ORT: install 'recollex[cpu]' for CPU, or one of 'recollex[gpu]', 'recollex[rocm]', 'recollex[directml]', 'recollex[openvino]', 'recollex[silicon]' for accelerators.")
+                        raise RuntimeError("onnxruntime is not installed. Pick an ORT: install 'recollex' for CPU, or one of 'recollex-gpu[cuda]', 'recollex-gpu[rocm]', 'recollex-gpu[directml]', 'recollex-gpu[silicon]' for accelerators.")
                     # Use our ONNXRuntime-based encoder by default
                     subfolder = (mk or {}).get("subfolder", "onnx/int8")
                     se = SparseEncoderONNX(

@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "recollex-core"
+name = "recollex-gpu"
 version = "0.1.0"
 description = "RAG indexer based on Sparse Neural Embeddings."
 readme = "README.md"
@@ -30,6 +30,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[tool.uv] 
+manylinux = "2_35"
+
 [tool.setuptools]
 include-package-data = true
 
@@ -53,7 +56,12 @@ cpu = [
 
 gpu = [
   # CUDA wheels exist on Linux/Windows; adjust if needed
-  "onnxruntime-gpu>=1.17; sys_platform in 'linux,win32'",
+  "onnxruntime-gpu>=1.17; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+
+cuda = [
+  # CUDA wheels exist on Linux/Windows; adjust if needed
+  "onnxruntime-gpu>=1.17;  sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
 rocm = [
@@ -65,13 +73,9 @@ directml = [
   "onnxruntime-directml>=1.17; sys_platform=='win32'",
 ]
 
-openvino = [
-  "onnxruntime-openvino>=1.17; sys_platform=='linux'",
-]
-
 silicon = [
   # Silicon wheels are macOS 14+ arm64 and ≤ Py3.11 for 1.16.3
-  "onnxruntime-silicon==1.16.3; sys_platform=='darwin' and platform_machine=='arm64' and python_version<'3.12'",
+  "onnxruntime-silicon==1.16.3; sys_platform=='darwin' and platform_machine=='arm64' and python_version<'3.12' and platform_release>='23.0.0'",
 ]
 
 [project.scripts]

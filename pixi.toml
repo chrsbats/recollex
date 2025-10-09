@@ -8,10 +8,12 @@ platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
 resolver = "uv"
 
 [environments]
-default  = { features = ["cpu"] }
-dev      = { features = ["cpu","dev"] }  
-nlp      = { features = ["cpu","dev","nlp"] } 
-gpu      = { features = ["cuda","rocm","directml","silicon"] } 
+default  = { features = ["cpu"], solve-group = "cpu"}
+dev      = { features = ["cpu","dev"], solve-group = "cpu" }  
+nlp      = { features = ["cpu","dev","nlp"], solve-group = "nlp" } 
+cuda     = { features = ["cuda"], solve-group = "cuda" } 
+directml = { features = ["directml"], solve-group = "directml" } 
+silicon  = { features = ["silicon"], solve-group = "silicon" }
 
 [dependencies]
 python = ">=3.10,<3.14"
@@ -19,7 +21,7 @@ numpy = "*"
 scipy = "*"
 
 [pypi-dependencies]
-recollex-core = { path = ".", editable = true }
+recollex-gpu = { path = ".", editable = true }
 
 [feature.dev.pypi-dependencies]
 ipython = ">=8,<9"
@@ -38,10 +40,10 @@ onnxruntime = ">=1.17"
 platforms = ["linux-64", "win-64"] 
 pypi-dependencies = { onnxruntime-gpu = ">=1.17" }
 
-[feature.rocm]
-platforms = ["linux-64"]
-dependencies = { python = ">=3.10,<3.12" }
-pypi-dependencies = { onnxruntime-rocm = ">=1.17" }
+# [feature.rocm]
+# platforms = ["linux-64"]
+# dependencies = { python = "==3.10" }
+# pypi-dependencies = { onnxruntime-rocm = ">=1.17" }
 
 [feature.directml]
 platforms = ["win-64"]
@@ -50,8 +52,10 @@ pypi-dependencies = { onnxruntime-directml = ">=1.17" }
 [feature.silicon]
 platforms = ["osx-arm64"]
 dependencies = { python = ">=3.10,<3.12" }
-pypi-dependencies = { onnxruntime-silicon = "==1.16.3" }
 
+[feature.silicon.pypi-dependencies] 
+recollex-gpu = { path = ".", editable = true, extras = ["silicon"] }
+ 
 [tasks]
 test = "pytest -q"
 clean = "recollex-clean"

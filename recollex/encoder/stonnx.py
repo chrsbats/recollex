@@ -23,7 +23,7 @@ class SparseEncoderONNX:
         max_active_dims: Optional[int] = 350,   # ST parity: cap non-zero terms
     ):
         if ort is None:
-            raise RuntimeError("onnxruntime is not installed. Pick an ORT: install 'recollex[cpu]' for CPU, or one of 'recollex[gpu]', 'recollex[rocm]', 'recollex[directml]', 'recollex[openvino]', 'recollex[silicon]' for accelerators.")
+            raise RuntimeError("onnxruntime is not installed. Pick an ORT: install 'recollex' for CPU, or one of 'recollex-gpu[cuda]', 'recollex-gpu[rocm]', 'recollex-gpu[directml]', 'recollex-gpu[silicon]' for accelerators.")
         self.model_dir = str(model_dir)
         self.onnx_path = (Path(model_dir) / "model.onnx") if not str(model_dir).endswith(".onnx") else Path(model_dir)
         if not self.onnx_path.exists():
