@@ -160,3 +160,5 @@ for r in excluded:
   - The engine keeps a simple in-memory CSR cache per segment. Avoid sharing a single Recollex instance across threads without external synchronization.
 - Splade++ model weights are quantized version of those provided by https://huggingface.co/prithivida/Splade_PP_en_v2 under Apache 2.0 license.
 - If you like this model it's also worth following **donkeystereotype** aka **Prithiviraj Damodaran** on github: https://github.com/PrithivirajDamodaran
+
+For internal design and contributor guidelines, see docs/design.md and docs/code_style.md.

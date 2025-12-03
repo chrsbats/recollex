@@ -2,15 +2,15 @@
 
 Sparse, filterable, RAM-friendly indexer for SPLADE-style vectors on Windows/Linux/macOS.
 
-See docs/code_style.md for the project’s preferred code style (function-first hooks; ABCs for stateful components).
+See docs/code_style.md for the project’s preferred code style (function-first hooks; ABCs for stateful components). This document is for maintainers; for black-box API usage see the README.
 
 ## 1) Mental model
 
 - Store vectors as **CSR** triplets on disk. Slice rows. Dot with query.
 - Store filters as **Roaring bitmaps** inside **SQLite** BLOBs. Intersect fast.
 - Append in **segments**. Delete via **tombstone bitmap**. Compact later.
-- Default encoder: SPLADE (prithivida/Splade_PP_en_v2) via sentence_transformers; optional ONNX Runtime (GPU) for the MLM forward. Pooling: ReLU → log(1+·) → reduce across tokens (max or sum). Use the same pooling for docs and queries.
-- Behavior profiles: paraphrase_hp (high precision), rag (high recall), log_recent (recency-first). Profiles select hook presets and runtime knobs.
+- Default encoder: SPLADE (seerware/Splade_PP_en_v2) via ONNX Runtime by default; sentence_transformers is used only when backend != "onnx". Pooling: ReLU → log(1+·) → reduce across tokens (max or sum). Use the same pooling for docs and queries.
+- Behavior profiles: paraphrase_hp (high precision), rag (high recall), recent (recency-first; aliases: log_recent, recency, log). Profiles select hook presets and runtime knobs.
 - Everything is local. No DB server. Optional ANN is out of scope here.
 
 ---
@@ -29,8 +29,8 @@ recollex/
 
 ### manifest.json
 
-dims is set at build time from the encoder tokenizer's vocab_size; you do not configure it manually.
-On open, if an encoder is present, the engine validates manifest.dims matches the encoder; otherwise it trusts the manifest.
+dims is set when the first segment is written (typically equals the encoder tokenizer's vocab_size) and you do not configure it manually.
+Subsequent segments must match manifest.dims; queries are validated against manifest.dims.
 
 ```json
 {
@@ -146,7 +146,7 @@ Profiles and knobs
   - Optional reranker over top 50–100 candidates.
 - rag (high recall):
   - min_must: 0–1, should_cap: 100–300, df_drop_top_percent: 0.5–1, budget: 50k–150k
-- log_recent (recency-first):
+- recent (recency-first):
   - Candidates = base bitmap (after filters/tombstones); rank by docs.seq desc; ignore dot scores for ordering.
 
 Exclusions
@@ -168,9 +168,9 @@ from typing import Callable, Iterable, Tuple, Dict, Any, List, Optional
 
 # Shapes are for documentation/type-checking; no Protocols required.
 FilterFn = Callable[
-    [Iterable[Tuple[int, float]], Dict[str, str], Callable[[str], "Roaring"],
-     Callable[[int], int], "Roaring", Iterable[str], Dict[str, Any]],
-    "Roaring"
+    [Iterable[Tuple[int, float]], Optional[Dict[str, str]], Callable[[str], "Roaring"],
+     Callable[[int], int], "Roaring", Optional[Iterable[str]], Dict[str, Any]],
+    Tuple[List[int], List[int]]  # (must_term_ids, should_term_ids)
 ]
 
 CandidateSupplierFn = Callable[
@@ -179,7 +179,7 @@ CandidateSupplierFn = Callable[
 ]
 
 ScoreFn = Callable[
-    ["csr_matrix", "SegmentCSR", Iterable[int]],
+    ["csr_matrix", Dict[str, Any], Iterable[int]],
     List[Tuple[int, float]]  # [(row_offset, score)]
 ]
 
@@ -284,7 +284,7 @@ encoder:
   pooling: "max" # "max" or "sum" (must match for docs/queries)
 
 runtime:
-  profile: "rag" # "paraphrase_hp" | "rag" | "log_recent"
+  profile: "rag" # "paraphrase_hp" | "rag" | "recent"
   budget: 50000
   min_must: 1
   should_cap: 100
@@ -362,11 +362,10 @@ Pick segments with `dead_ratio > threshold`. Rebuild a fresh segment with live r
 ## 11) Minimal public API
 
 ```python
-engine = Recollex.open("./recollex", cfg)
+engine = Recollex.open("./recollex")
 
-engine.add_many(iter_docs)         # build-time only; not for serving
-engine.tombstone(doc_ids)          # logical delete
-engine.compact(threshold=0.2)      # offline maintenance
+engine.add_many(iter_docs)
+engine.remove(doc_ids)
 
 results = engine.search(
   q_terms=[(tid, wt), ...],                # empty list allowed for log_recent
@@ -380,12 +379,13 @@ results = engine.search(
 
 # Convenience for recency-first:
 recent = engine.last(filters={"tenant":"acme","user":"u123"}, k=50)
-# equivalent to search(..., q_terms=[], profile="log_recent")
+# equivalent to search(..., text="", profile="recent")
 ```
 
 ---
 
 ## 12) CLI (suggested)
+Only prefetch and clean are provided out of the box; the rest are illustrative examples.
 
 ```
 recollex init PATH --dims D
