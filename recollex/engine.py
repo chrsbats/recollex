@@ -669,16 +669,19 @@ class Recollex:
         for t in terms:
             name = f"{TERM_PREFIX}{int(t)}"
             bm_t = self._get_bitmap(name)
+            removed = False
             try:
                 bm_t.remove(int(did_int))
+                removed = True
                 self._store.put_bitmap(name, bm_t.serialize())
             except KeyError:
                 pass
-            stat_key = f"term_df:{int(t)}"
-            cur = int(self._store.get_stat(stat_key) or 0)
-            new = max(0, cur - 1)
-            if new != cur:
-                self._store.put_stat(stat_key, new)
+            if removed:
+                stat_key = f"term_df:{int(t)}"
+                cur = int(self._store.get_stat(stat_key) or 0)
+                new = max(0, cur - 1)
+                if new != cur:
+                    self._store.put_stat(stat_key, new)
 
     def _remove_doc_tags_and_update_bitmaps(self, did_int: int, rec: DocRecord) -> None:
         """
@@ -838,6 +841,35 @@ class Recollex:
             # Update live_docs via helper
             self._live_docs_remove(ids)
 
+    def remove_by(
+        self,
+        *,
+        filters: Optional[Dict[str, str]] = None,
+        all_of_tags: Optional[Sequence[str]] = None,
+        one_of_tags: Optional[Sequence[str]] = None,
+        none_of_tags: Optional[Sequence[str]] = None,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Remove all documents matching the provided scope (filters/tags).
+        Returns the number of docs that would be (or were) removed.
+        """
+        base = self._build_base_bitmap(
+            q_terms=[],
+            exclude_doc_ids=None,
+            filters=filters,
+            tags_all_of=all_of_tags,
+            tags_one_of=one_of_tags,
+            tags_none_of=none_of_tags,
+        )
+        if len(base) == 0:
+            return 0
+        ids = [int(x) for x in base]
+        if dry_run:
+            return len(ids)
+        self.remove(ids)
+        return len(ids)
+
     def search_terms(
         self,
         q_terms: Sequence[Tuple[int, float]],
@@ -847,6 +879,7 @@ class Recollex:
         exclude_doc_ids: Optional[Iterable[str]] = None,
         override_knobs: Optional[Dict[str, Any]] = None,
         rerank_top_m: Optional[int] = None,  # placeholder; no reranker wired
+        min_score: Optional[float] = None,
         filters: Optional[Dict[str, str]] = None,             # legacy k=v
         tags_all_of: Optional[Sequence[str]] = None,          # new API
         tags_one_of: Optional[Sequence[str]] = None,          # new API
@@ -865,7 +898,7 @@ class Recollex:
 
         # Guard: if scoring profile and manifest dims known, ensure all query term ids fit
         D_manifest_check = int(self._manifest.get("dims", 0) or 0)
-        if order != "recent" and D_manifest_check > 0 and q_terms:
+        if ((order != "recent") or (min_score is not None)) and D_manifest_check > 0 and q_terms:
             max_tid = max(int(t) for t, _ in q_terms)
             if max_tid >= D_manifest_check:
                 raise ValueError(
@@ -926,8 +959,19 @@ class Recollex:
                 cand_doc_ids: List[str] = []
                 lim = int(budget or k)
                 ex = set(str(x) for x in (exclude_doc_ids or []))
+                live = self._get_bitmap(LIVE_DOCS)
+                tomb = self._get_bitmap(TOMBSTONES)
                 for did in self._store.iter_recent_doc_ids(lim * 2):
                     if did in ex:
+                        continue
+                    try:
+                        did_int = int(did)
+                    except Exception:
+                        did_int = None
+                    # Exclude tombstoned docs (prefer LIVE_DOCS membership if present)
+                    if live and did_int is not None and (did_int not in live):
+                        continue
+                    if (not live) and tomb and did_int is not None and (did_int in tomb):
                         continue
                     cand_doc_ids.append(did)
                     if len(cand_doc_ids) >= lim:
@@ -954,11 +998,44 @@ class Recollex:
         # Recency branch: rank by seq desc using store.get_doc
         if order == "recent":
             per_segment_rows, index, doc_by_id = self._group_candidate_docs(cand_doc_ids)
-            per_segment: Dict[str, List[Tuple[int, int]]] = {}
-            # Build (row_offset, seq) pairs from per_segment_rows
-            for seg_id, rows in per_segment_rows.items():
-                recs_seg = [doc_by_id[index[(seg_id, r)]] for r in rows]
-                per_segment[seg_id] = [(int(r), int(rec.seq)) for r, rec in zip(rows, recs_seg)]
+
+            # Optional: if a min_score is provided and we have query terms, gate by score >= threshold
+            if min_score is not None and q_terms:
+                D_manifest = int(self._manifest.get("dims", 0) or 0)
+                q_csr, q_dims = self._q_to_csr(q_terms, target_dims=(D_manifest if D_manifest > 0 else None))
+                thr = float(min_score)
+                # Compute scores per segment; keep only rows with score >= thr
+                passing_by_seg: Dict[str, set[int]] = {}
+                for seg_id, rows in per_segment_rows.items():
+                    X_use = self._csr_for_segment(seg_id, q_dims if q_dims > 0 else None)
+                    if q_dims > 0:
+                        scores = score_csr_slice(q_csr, {"csr": X_use}, rows)
+                    else:
+                        scores = [(int(r), 0.0) for r in rows]
+                    keep = {int(r) for r, s in scores if float(s) >= thr}
+                    if keep:
+                        passing_by_seg[seg_id] = keep
+
+                per_segment: Dict[str, List[Tuple[int, int]]] = {}
+                for seg_id, rows in per_segment_rows.items():
+                    keep = passing_by_seg.get(seg_id)
+                    if not keep:
+                        continue
+                    filtered: List[Tuple[int, int]] = []
+                    for r in rows:
+                        if r in keep:
+                            rec = doc_by_id[index[(seg_id, r)]]
+                            filtered.append((int(r), int(rec.seq)))
+                    if filtered:
+                        per_segment[seg_id] = filtered
+                if not per_segment:
+                    return []
+            else:
+                per_segment = {}
+                # Build (row_offset, seq) pairs from per_segment_rows
+                for seg_id, rows in per_segment_rows.items():
+                    recs_seg = [doc_by_id[index[(seg_id, r)]] for r in rows]
+                    per_segment[seg_id] = [(int(r), int(rec.seq)) for r, rec in zip(rows, recs_seg)]
 
             merged = rank_merge_recent(per_segment, k)
             out: List[Dict[str, Any]] = []
@@ -995,6 +1072,9 @@ class Recollex:
             per_segment_scores[seg_id] = scores
 
         merged = rank_merge_heap(per_segment_scores, k)
+        if min_score is not None:
+            thr = float(min_score)
+            merged = [(seg_id, row_off, score) for (seg_id, row_off, score) in merged if float(score) >= thr]
 
         # Optional rerank placeholder (no-op)
         if rerank_top_m and rerank_top_m > 0:
@@ -1027,6 +1107,7 @@ class Recollex:
         exclude_doc_ids: Optional[Iterable[str]] = None,
         override_knobs: Optional[Dict[str, Any]] = None,
         rerank_top_m: Optional[int] = None,
+        min_score: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         # Batch mode: list means batch
         if isinstance(text_or_texts, list):
@@ -1042,6 +1123,7 @@ class Recollex:
                     exclude_doc_ids=exclude_doc_ids,
                     override_knobs=override_knobs,
                     rerank_top_m=rerank_top_m,
+                    min_score=min_score,
                     filters=None,
                     tags_all_of=all_of_tags,
                     tags_one_of=one_of_tags,
@@ -1059,6 +1141,7 @@ class Recollex:
             exclude_doc_ids=exclude_doc_ids,
             override_knobs=override_knobs,
             rerank_top_m=rerank_top_m,
+            min_score=min_score,
             filters=None,
             tags_all_of=all_of_tags,
             tags_one_of=one_of_tags,
@@ -1079,3 +1162,29 @@ class Recollex:
             rerank_top_m=None,
             filters=filters,
         )
+
+    def close(self) -> None:
+        """
+        Close open resources: segment readers and the underlying store.
+        Safe to call multiple times.
+        """
+        try:
+            for ent in list(self._seg_cache.values()):
+                try:
+                    ent["reader"].close()
+                except Exception:
+                    pass
+            self._seg_cache.clear()
+        except Exception:
+            pass
+        try:
+            if hasattr(self._store, "close"):
+                self._store.close()
+        except Exception:
+            pass
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

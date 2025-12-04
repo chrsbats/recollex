@@ -332,3 +332,9 @@ class SQLiteMetadataStore(MetadataStore):
             self._conn.close()
         except Exception:
             pass
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

@@ -23,11 +23,14 @@ API at a glance
 - Add (advanced, pre-encoded):
   - rx.add_many([{doc_id, indices, data, text?, tags?, seq?}, ...]) -> {"n_docs","nnz"}
 - Search:
-  - rx.search(text, k=50, all_of_tags=None, one_of_tags=None, none_of_tags=None, profile="rag", exclude_doc_ids=None) -> List[result]
+  - rx.search(text, k=50, all_of_tags=None, one_of_tags=None, none_of_tags=None, profile="rag", exclude_doc_ids=None, override_knobs=None, min_score=None) -> List[result]
   - rx.search([text, ...], ...) -> List[List[result]]  # same order as inputs
   - rx.last(filters=None, k=50) -> List[result]  # recency shortcut
 - Remove:
-  - rx.remove(id | [ids]) -> None
+  - rx.remove(id | [ids]) -> None  # accepts int or str; non-numeric values are ignored
+  - rx.remove_by(filters=None, all_of_tags=None, one_of_tags=None, none_of_tags=None, dry_run=False) -> int
+    - Removes all docs matching the provided scope. Returns the count of removed docs.
+    - dry_run=True returns the count without deleting.
 
 Result object (dict)
 - doc_id: str
@@ -107,25 +110,23 @@ batches = rx.search(["redis", "postgres"], all_of_tags=["tenant:acme"], k=5)
 9) Exclude specific doc_ids
 ```python
 hits = rx.search("db", all_of_tags=["tenant:acme"], exclude_doc_ids=[str(did)], k=10)
-# Non-numeric values are ignored.
+# accepts int or str; non-numeric values are ignored.
 ```
 
 10) Remove docs
 ```python
 rx.remove(did)
 rx.remove([did1, did2, did3])
+# Remove by scope (tags/filters)
+n = rx.remove_by(all_of_tags=["tenant:acme"])        # remove all docs for tenant:acme
+m = rx.remove_by(filters={"tenant":"acme"}, dry_run=True)  # count only, no delete
 ```
 
 Recipes
 
-- “Recent, filtered by score threshold”:
-  1) Score search within scope, fetch larger k.
-  2) Filter client‑side by score, then sort by seq desc.
+- “Recent, filtered by score threshold”: one call using min_score (keeps only docs with score >= threshold, ordered by recency)
 ```python
-pool = rx.search("redis", all_of_tags=["tenant:acme"], k=500)
-pool = [r for r in pool if r["score"] >= 0.2]
-pool.sort(key=lambda r: r["seq"] or 0, reverse=True)
-top_recent_scored = pool[:20]
+top_recent_scored = rx.search("redis", all_of_tags=["tenant:acme"], profile="recent", min_score=0.2, k=20)
 ```
 
 Notes
@@ -137,7 +138,10 @@ Notes
   - add/search: use strings like "tenant:acme".
   - add_many: pass dict for key=value style (becomes tag:tenant=acme).
   - Special: "everything" inside a tag list means “no restriction” for that list.
-- Exclusions: exclude_doc_ids affects only numeric ids.
+- Exclusions: exclude_doc_ids accepts ints or strings; only numeric ids affect results; non-numeric values are ignored.
+- doc_id typing: search results expose doc_id as str; add() returns int ids; remove() accepts int or str (non-numeric values are ignored).
 - k defaults to 50; increase if you plan client‑side score thresholds or reordering.
 - Model cache: first encode (or recollex-prefetch) downloads the model under ./models/<name>/; precision auto‑selected (override with --quant).
 - Advanced: search_terms(q_terms=[(tid, wt), ...]) exists but is optional for most users.
+- Advanced: override_knobs (for search/search_terms) allows tuning filtering/gating knobs: min_must, should_cap, budget, df_drop_top_percent.
+- min_score (optional float): for score profiles, filters out results with score < min_score. For profile="recent" with a non-empty query, keeps only docs with score >= min_score but still orders by recency (ignored if the query is empty).
