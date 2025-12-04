@@ -1,15 +1,10 @@
-# Recollex API (black-box usage)
-
-This guide covers the public surface you need to build and query an index. It intentionally avoids internals and tuning.
-
-If you haven’t installed the package or reviewed the quickstart, see the README.
+# Recollex API (black-box)
 
 What you can do
-- Create or open an index directory.
+- Create/open an index directory.
 - Add documents (single or batch) with tags and a timestamp.
-- Search by text (ranked by score).
-- Get most recent documents (optionally scoped by tags).
-- Exclude specific doc_ids from results.
+- Search by text (ranked by score) or by recency.
+- Scope queries with tags; exclude specific doc_ids.
 - Remove documents.
 
 Import
@@ -17,105 +12,113 @@ Import
 from recollex import Recollex
 ```
 
-Create/open an index
-- Recollex(path) auto-creates the directory (and SQLite metadata) if missing, or loads an existing index.
+API at a glance
+- Open:
+  - rx = Recollex("./index_dir")  # or Recollex.open("./index_dir")
+- Add:
+  - rx.add(text, tags=None, timestamp=None) -> int
+  - rx.add([ (text, tags, timestamp), {"text":..., "tags":[...], "timestamp":...}, ... ]) -> List[int]
+    - Tuple form must be exactly (text, tags, timestamp). Dict form may omit timestamp.
+- Add (advanced, pre-encoded):
+  - rx.add_many([{doc_id, indices, data, text?, tags?, seq?}, ...]) -> {"n_docs","nnz"}
+- Search:
+  - rx.search(text, k=50, all_of_tags=None, one_of_tags=None, none_of_tags=None, profile="rag", exclude_doc_ids=None) -> List[result]
+  - rx.search([text, ...], ...) -> List[List[result]]  # same order as inputs
+  - rx.last(filters=None, k=50) -> List[result]  # recency shortcut
+- Remove:
+  - rx.remove(id | [ids]) -> None
+
+Result object (dict)
+- doc_id: str
+- segment_id: str
+- row_offset: int
+- score: float  # 0.0 for profile="recent"
+- seq: int | None
+- text: Optional[str]
+- tags: Optional[dict or list]  # matches how you added the doc
+
+Common tasks
+
+1) Create/open an index
 ```python
-rx = Recollex("./my_index")        # or Recollex.open("./my_index")
+rx = Recollex("./my_index")
 ```
 
-Add documents
-
-Single add (simple)
-- Assigns an integer doc_id automatically.
-- tags: sequence of strings (each becomes a tag like "tenant:acme").
-- timestamp: any monotonically increasing int (e.g., int(time.time())).
-  - If omitted, the engine assigns a sequence value; provide one if you plan to use recency features.
+2) Add docs (single)
 ```python
 import time
-did = rx.add(
-    "Redis quickstart",
-    tags=["tenant:acme", "topic:db"],
-    timestamp=int(time.time())
-)
+did = rx.add("Redis quickstart", tags=["tenant:acme", "topic:db"], timestamp=int(time.time()))
 ```
 
-Batch add via add (tuples or dicts)
-- Pass a list of items; returns a list of assigned int doc_ids.
-- Tuple form: (text, tags, timestamp)
-- Dict form: {"text": str, "tags": Sequence[str], "timestamp": int}
+3) Add docs (batch via add)
 ```python
 items = [
-    ("Postgres tips", ["tenant:acme", "topic:db"], int(time.time())),
-    {"text": "SQLite notes", "tags": ["tenant:acme", "topic:db"], "timestamp": int(time.time())+1},
+  ("Postgres tips", ["tenant:acme","topic:db"], int(time.time())),
+  {"text":"SQLite notes","tags":["tenant:acme","topic:db"],"timestamp":int(time.time())+1},
 ]
 ids = rx.add(items)
 ```
 
-Advanced batch add via add_many
-- Use when you already have sparse vectors (indices/data) or want structured tags.
-- Input is a list of dicts. doc_id must be numeric (int or numeric string).
-- Returns {"n_docs": N, "nnz": total_nonzeros}.
-Doc schema:
+4) Add docs (batch via add_many; pre-encoded)
 ```python
-docs = [
-  {
-    "doc_id": 101,                 # int or numeric string
-    "indices": [2, 7, 9],          # term ids (non-negative)
-    "data":    [0.3, 0.8, 0.2],    # weights; same length as indices
-    "text": "Optional blob",
-    "tags": ["tenant:acme", "topic:db"]  # or dict: {"tenant": "acme", "topic": "db"}
-    # "seq": int(time.time()),      # optional; if omitted, engine assigns
-  },
-]
-rx.add_many(docs)  # {"n_docs": 1, "nnz": 3}
-```
-Notes:
-- If tags is a dict, entries produce tag bitmaps like tag:tenant=acme.
-- If tags is a sequence of strings, each string is used as-is (e.g., "tenant:acme").
-- dims and segment selection are automatic; you don’t need to set them.
-
-Search
-
-1) Highest score (default profile="rag")
-```python
-results = rx.search("postgres connection pool", k=5)
-for r in results:
-    print(r["doc_id"], round(r["score"], 4), r["tags"])
+docs = [{
+  "doc_id": 101,                  # int or numeric string
+  "indices": [2,7,9], "data": [0.3,0.8,0.2],
+  "text": "Custom vector doc",
+  "tags": {"tenant":"acme","topic":"db"},   # or ["tenant:acme","topic:db"]
+  "seq": int(time.time()),                  # optional
+}]
+rx.add_many(docs)
 ```
 
-2) Highest score within tag scope
-- all_of_tags: intersection (must contain all)
-- one_of_tags: union (must contain at least one)
-- none_of_tags: exclusion
+5) Search (top‑k by score; default profile="rag")
 ```python
-results = rx.search(
-    "database best practices",
-    all_of_tags=["tenant:acme", "topic:db"],
-    none_of_tags=["topic:food"],
-    k=10,
+hits = rx.search("postgres connection pool", k=5)
+```
+
+6) Search within tags
+```python
+hits = rx.search(
+  "database best practices",
+  all_of_tags=["tenant:acme", "topic:db"],    # intersection
+  one_of_tags=None,                           # union if provided
+  none_of_tags=["topic:food"],                # exclusion
+  k=10,
 )
 ```
 
-3) Most recent (recency-first)
-- Ignores dot-product scores for ordering; ranks by seq descending.
+7) Most recent (recency‑first), optionally scoped
 ```python
 recent = rx.search("", profile="recent", k=5)
-```
-
-3a) Most recent within a tag scope
-```python
 recent_scoped = rx.search("", profile="recent", all_of_tags=["tenant:acme"], k=5)
+# Shortcut:
+recent2 = rx.last(k=5)
+recent3 = rx.last(filters={"tenant":"acme"}, k=5)  # key=value scope (structured tags)
 ```
 
-4) Score thresholding (client-side)
-- There’s no min_score parameter. Fetch a larger k and filter in your code.
+8) Batch search
 ```python
-pool = rx.search("redis", all_of_tags=["tenant:acme"], k=200)
-filtered = [r for r in pool if r["score"] >= 0.2]
+batches = rx.search(["redis", "postgres"], all_of_tags=["tenant:acme"], k=5)
+# batches[0] -> results for "redis"; batches[1] -> results for "postgres"
 ```
 
-4a) “Recent, filtered by score threshold” (two-step)
-- Get candidates by score within your scope, filter, then order by recency.
+9) Exclude specific doc_ids
+```python
+hits = rx.search("db", all_of_tags=["tenant:acme"], exclude_doc_ids=[str(did)], k=10)
+# Non-numeric values are ignored.
+```
+
+10) Remove docs
+```python
+rx.remove(did)
+rx.remove([did1, did2, did3])
+```
+
+Recipes
+
+- “Recent, filtered by score threshold”:
+  1) Score search within scope, fetch larger k.
+  2) Filter client‑side by score, then sort by seq desc.
 ```python
 pool = rx.search("redis", all_of_tags=["tenant:acme"], k=500)
 pool = [r for r in pool if r["score"] >= 0.2]
@@ -123,55 +126,16 @@ pool.sort(key=lambda r: r["seq"] or 0, reverse=True)
 top_recent_scored = pool[:20]
 ```
 
-Batch search
-- Pass a list of texts; return is a list of result-lists in the same order.
-```python
-batches = rx.search(["redis", "postgres"], all_of_tags=["tenant:acme"], k=5)
-# batches[0] -> results for "redis"; batches[1] -> results for "postgres"
-```
-
-Exclude specific doc_ids
-- Non-numeric values are ignored.
-```python
-results = rx.search("db", all_of_tags=["tenant:acme"], exclude_doc_ids=[str(did)], k=10)
-```
-
-Remove documents
-- Remove one or many by id (ints or strings). No-op for unknown ids.
-```python
-rx.remove(did)
-rx.remove([did1, did2, did3])
-```
-
-Convenience: recent
-```python
-recent = rx.last(k=20)                         # global recent
-recent_tenant = rx.last(filters={"tenant":"acme"}, k=20)  # structured tag scope (key=value)
-```
-
-Result shape
-Each result is a dict:
-- doc_id: str
-- segment_id: str
-- row_offset: int
-- score: float (0.0 for profile="recent")
-- seq: int | None
-- text: Optional[str]
-- tags: Optional[dict or list], matching how it was added
-
-Notes and behavior
-- Smart defaults: you don’t need to configure caches, dims, or providers.
+Notes
+- Smart defaults: no need to configure caches, dims, or providers.
 - Empty text:
-  - profile="rag" (default): returns empty results.
-  - profile="recent": returns most recent documents (optionally scoped by tags).
+  - profile="rag" → empty results.
+  - profile="recent" → most recent (optionally scoped by tags).
 - Tags:
-  - Use strings like "tenant:acme" with add/search helpers.
-  - For key=value style (tag:k=v), use add_many with tags as dicts.
-  - The special string "everything" in a tag list is treated as no restriction.
-- Exclusions: exclude_doc_ids only affect numeric ids.
-- k defaults to 50; increase if you plan to apply client-side score thresholds or resorting.
-- Model cache: the first encode (or the recollex-prefetch CLI) downloads the model under ./models/<name>/; precision is auto-selected (override with --quant).
-
-Advanced (optional)
-- search_terms(q_terms=[(tid, wt), ...], ...): send your own sparse query terms.
-- override_knobs, rerank_top_m: reserved for advanced scenarios; safe to ignore in normal usage.
+  - add/search: use strings like "tenant:acme".
+  - add_many: pass dict for key=value style (becomes tag:tenant=acme).
+  - Special: "everything" inside a tag list means “no restriction” for that list.
+- Exclusions: exclude_doc_ids affects only numeric ids.
+- k defaults to 50; increase if you plan client‑side score thresholds or reordering.
+- Model cache: first encode (or recollex-prefetch) downloads the model under ./models/<name>/; precision auto‑selected (override with --quant).
+- Advanced: search_terms(q_terms=[(tid, wt), ...]) exists but is optional for most users.
