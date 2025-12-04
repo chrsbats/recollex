@@ -23,6 +23,7 @@ build/
 
 # Distribution / packaging
 .Python
+pkgs/
 build/
 develop-eggs/
 dist/
