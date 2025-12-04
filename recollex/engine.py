@@ -680,6 +680,45 @@ class Recollex:
             if new != cur:
                 self._store.put_stat(stat_key, new)
 
+    def _remove_doc_tags_and_update_bitmaps(self, did_int: int, rec: DocRecord) -> None:
+        """
+        Remove doc id from all relevant tag bitmaps based on rec.tags.
+        Safe to call inside an active store.transaction().
+        """
+        tags = rec.tags
+        if not tags:
+            return
+        try:
+            if isinstance(tags, dict):
+                for k, v in tags.items():
+                    name = f"{TAG_PREFIX}{k}={v}"
+                    bm = self._get_bitmap(name)
+                    try:
+                        bm.remove(int(did_int))
+                        self._store.put_bitmap(name, bm.serialize())
+                    except KeyError:
+                        pass
+            elif isinstance(tags, (list, tuple, set)):
+                for t in tags:
+                    name = f"{TAG_PREFIX}{str(t)}"
+                    bm = self._get_bitmap(name)
+                    try:
+                        bm.remove(int(did_int))
+                        self._store.put_bitmap(name, bm.serialize())
+                    except KeyError:
+                        pass
+            else:
+                name = f"{TAG_PREFIX}{str(tags)}"
+                bm = self._get_bitmap(name)
+                try:
+                    bm.remove(int(did_int))
+                    self._store.put_bitmap(name, bm.serialize())
+                except KeyError:
+                    pass
+        except Exception:
+            # Be defensive; tag removal should not abort the whole remove flow
+            pass
+
     def _live_docs_remove(self, ids: Iterable[int]) -> None:
         """
         Remove given ids from LIVE_DOCS bitmap and update its count stat.
@@ -787,6 +826,10 @@ class Recollex:
                 rec = self._store.get_doc(str(did))
                 if rec is None:
                     continue
+                try:
+                    self._remove_doc_tags_and_update_bitmaps(int(did), rec)
+                except Exception:
+                    pass
                 try:
                     self._remove_doc_terms_and_update_df(int(did), rec)
                 except Exception:

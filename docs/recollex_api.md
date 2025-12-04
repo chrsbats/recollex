@@ -1,4 +1,4 @@
-# Recollex API (black-box)
+# Recollex API 
 
 What you can do
 - Create/open an index directory.

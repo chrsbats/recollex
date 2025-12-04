@@ -22,7 +22,8 @@ class SQLiteMetadataStore(MetadataStore):
 
     def __init__(self, db_path: Union[str, Path], bitmap_cache_size: int = 256) -> None:
         self._path = str(db_path)
-        self._conn = sqlite3.connect(self._path)
+        self._conn = sqlite3.connect(self._path, timeout=5.0)
+        self._conn.execute("PRAGMA busy_timeout=5000;")
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.execute("PRAGMA foreign_keys=ON;")
@@ -87,6 +88,26 @@ class SQLiteMetadataStore(MetadataStore):
 
         self._conn.commit()
 
+    # ---------- Helpers ----------
+    def _exec_retry(self, sql: str, params: tuple = (), max_tries: int = 8):
+        """
+        Execute a write statement with retry-on-busy. Retries on sqlite3.OperationalError
+        containing 'database is locked' with exponential backoff up to max_tries.
+        """
+        tries = 0
+        delay = 0.02
+        while True:
+            try:
+                return self._conn.execute(sql, params)
+            except sqlite3.OperationalError as e:
+                msg = str(e).lower()
+                if "database is locked" in msg and tries < max_tries - 1:
+                    time.sleep(delay)
+                    delay = min(delay * 2.0, 0.5)
+                    tries += 1
+                    continue
+                raise
+
     # ---------- Transactions ----------
     @contextmanager
     def transaction(self) -> ContextManager[None]:
@@ -96,7 +117,7 @@ class SQLiteMetadataStore(MetadataStore):
             return
         self._in_tx = True
         cur = self._conn.cursor()
-        cur.execute("BEGIN")
+        cur.execute("BEGIN IMMEDIATE")
         try:
             yield
             self._conn.commit()
@@ -109,7 +130,7 @@ class SQLiteMetadataStore(MetadataStore):
     # ---------- Documents ----------
     def upsert_doc(self, doc: DocRecord) -> None:
         tags_text = None if doc.tags is None else json.dumps(doc.tags, separators=(",", ":"))
-        self._conn.execute(
+        self._exec_retry(
             """
             INSERT INTO docs(doc_id, segment_id, row_offset, seq, text, tags)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -207,7 +228,7 @@ class SQLiteMetadataStore(MetadataStore):
 
     def _touch_last_used(self, name: str) -> None:
         now = int(time.time())
-        self._conn.execute("UPDATE bitmaps SET last_used=? WHERE name=?", (now, name))
+        self._exec_retry("UPDATE bitmaps SET last_used=? WHERE name=?", (now, name))
         if not self._in_tx:
             self._conn.commit()
 
@@ -230,7 +251,7 @@ class SQLiteMetadataStore(MetadataStore):
     def put_bitmap(self, name: str, blob: BitmapBlob) -> None:
         blob_text = self._coerce_blob_in(blob)
         now = int(time.time())
-        self._conn.execute(
+        self._exec_retry(
             """
             INSERT INTO bitmaps(name, data, last_used)
             VALUES (?, ?, ?)
@@ -245,7 +266,7 @@ class SQLiteMetadataStore(MetadataStore):
             self._conn.commit()
 
     def delete_bitmap(self, name: str) -> None:
-        self._conn.execute("DELETE FROM bitmaps WHERE name=?", (name,))
+        self._exec_retry("DELETE FROM bitmaps WHERE name=?", (name,))
         if name in self._bm_cache:
             self._bm_cache.pop(name, None)
         if not self._in_tx:
@@ -272,7 +293,7 @@ class SQLiteMetadataStore(MetadataStore):
         return int(row["value"]) if row else None
 
     def put_stat(self, key: str, value: int) -> None:
-        self._conn.execute(
+        self._exec_retry(
             """
             INSERT INTO stats(key, value)
             VALUES (?, ?)
@@ -289,7 +310,7 @@ class SQLiteMetadataStore(MetadataStore):
         return row["value"] if row else None
 
     def put_kv(self, key: str, value: str) -> None:
-        self._conn.execute(
+        self._exec_retry(
             """
             INSERT INTO kv(key, value)
             VALUES (?, ?)
@@ -301,7 +322,7 @@ class SQLiteMetadataStore(MetadataStore):
             self._conn.commit()
 
     def delete_kv(self, key: str) -> None:
-        self._conn.execute("DELETE FROM kv WHERE key=?", (key,))
+        self._exec_retry("DELETE FROM kv WHERE key=?", (key,))
         if not self._in_tx:
             self._conn.commit()
 
