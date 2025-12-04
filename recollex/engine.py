@@ -611,7 +611,7 @@ class Recollex:
                 if isinstance(it, dict):
                     text = it["text"]
                     tags_i = it.get("tags") or []
-                    ts = it.get("timestamp", it.get("seq", 0))
+                    ts = it.get("timestamp", it.get("seq", None))
                 else:
                     text, tags_i, ts = it
                 docs.append({
@@ -620,7 +620,7 @@ class Recollex:
                     "data": vals,
                     "text": text,
                     "tags": list(tags_i or []),
-                    "seq": int(ts),
+                    "seq": (int(ts) if ts is not None else None),
                 })
             self.add_many(docs, segment_id=None, dims=enc.dims)
             return [int(x) for x in ids]

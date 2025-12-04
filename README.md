@@ -150,7 +150,7 @@ for r in excluded:
 - Structured tags (key=value):
   - If you need `tag:k=v` style, use `add_many` and pass tags as a dict for each doc (e.g., `{"tenant":"acme","topic":"db"}`). The engine will populate bitmaps `tag:tenant=acme`, `tag:topic=db`.
 - Model download:
-  - The first encode or recollex-prefetch will download the SPLADE ONNX model into `./models/seerware\__Splade_PP_en_v2/`. Precision is auto-selected (int8/fp16/fp32) based on your onnxruntime install/providers; override with --quant.
+  - The first encode or recollex-prefetch will download the SPLADE ONNX model into `./models/seerware__Splade_PP_en_v2/`. Precision is auto-selected (int8/fp16/fp32) based on your onnxruntime install/providers; override with --quant.
   - Use recollex-clean to remove the model cache (or a single precision with --quant).
 - Storage layout:
   - Index data lives under `./recollex_index/` (manifest.json + segments/\*). Metadata lives in `meta.sqlite`.
@@ -162,3 +162,5 @@ for r in excluded:
 - If you like this model it's also worth following **donkeystereotype** aka **Prithiviraj Damodaran** on github: https://github.com/PrithivirajDamodaran
 
 For internal design and contributor guidelines, see docs/design.md and docs/code_style.md.
+For the public API, see docs/recollex_api.md. Tuning notes: docs/recollex_tuning.md.
+Batch note: index.search([...], k=...) returns List[List[result]] (one result list per input text).

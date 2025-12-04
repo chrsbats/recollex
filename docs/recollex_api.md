@@ -17,8 +17,9 @@ API at a glance
   - rx = Recollex("./index_dir")  # or Recollex.open("./index_dir")
 - Add:
   - rx.add(text, tags=None, timestamp=None) -> int
-  - rx.add([ (text, tags, timestamp), {"text":..., "tags":[...], "timestamp":...}, ... ]) -> List[int]
-    - Tuple form must be exactly (text, tags, timestamp). Dict form may omit timestamp.
+  - rx.add([ (text, tags, timestamp), {"text":..., "tags":[...], "timestamp":...} | {"text":...,"tags":[...],"seq":...}, ... ]) -> List[int]
+    - Tuple form must be exactly (text, tags, timestamp).
+    - Dict form: pass "timestamp" (preferred) or "seq". If you omit both, the engine assigns a sequence value; pass one if you care about recency ordering.
 - Add (advanced, pre-encoded):
   - rx.add_many([{doc_id, indices, data, text?, tags?, seq?}, ...]) -> {"n_docs","nnz"}
 - Search:
@@ -55,6 +56,7 @@ did = rx.add("Redis quickstart", tags=["tenant:acme", "topic:db"], timestamp=int
 items = [
   ("Postgres tips", ["tenant:acme","topic:db"], int(time.time())),
   {"text":"SQLite notes","tags":["tenant:acme","topic:db"],"timestamp":int(time.time())+1},
+  {"text":"SQLite notes v2","tags":["tenant:acme","topic:db"],"seq":int(time.time())+2},
 ]
 ids = rx.add(items)
 ```

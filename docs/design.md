@@ -272,15 +272,15 @@ See also: docs/code_style.md for the project’s code style and philosophy.
 
 ---
 
-## 7) Config (YAML)
+## 7) Config (YAML) [illustrative]
 
 ```yaml
 index_path: ./recollex
 # dims derives from the encoder tokenizer; do not configure
 
 encoder:
-  model: "prithivida/Splade_PP_en_v2"
-  onnx: false # set true to use onnxruntime
+  model: "seerware/Splade_PP_en_v2"
+  # ONNX Runtime is the default; you usually don't need to configure a backend flag
   pooling: "max" # "max" or "sum" (must match for docs/queries)
 
 runtime:
@@ -367,13 +367,19 @@ engine = Recollex.open("./recollex")
 engine.add_many(iter_docs)
 engine.remove(doc_ids)
 
+# Text path (black-box)
 results = engine.search(
-  q_terms=[(tid, wt), ...],                # empty list allowed for log_recent
-  filters={"tenant":"acme","user":"u123"},
+  "postgres connection pool",
   k=50,
-  profile="rag",                           # "paraphrase_hp" | "rag" | "log_recent"
+  profile="rag",                           # "paraphrase_hp" | "rag" | "recent"
   exclude_doc_ids=[],                      # optional exclusions
-  rerank_top_m=None                        # overrides config if not None
+)
+# Advanced: explicit sparse query terms
+results2 = engine.search_terms(
+  q_terms=[(tid, wt), ...],
+  k=50,
+  profile="rag",
+  filters={"tenant":"acme","user":"u123"}, # or tags_* scope
 )
 # -> [{"doc_id":..., "score":..., "segment_id":"seg_000","row_offset":1234, "tags":{...}, "text":"...", "seq": 123456}]
 
