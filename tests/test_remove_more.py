@@ -69,3 +69,16 @@ def test_all_docs_bitmap_fallback_and_tombstones(tmp_path: Path):
     rx._store.delete_bitmap(LIVE_DOCS)
     bm2 = rx._all_docs_bitmap()
     assert set(bm2) == {int(b)}
+
+
+def test_remove_by_dry_run_returns_count_without_deleting(tmp_path: Path):
+    rx = Recollex.open(tmp_path / "idx_remove_dry_run")
+    d1 = rx.add("x", tags={"project": "p1"}, timestamp=1)
+    d2 = rx.add("x", tags={"project": "p1"}, timestamp=2)
+
+    # Dry run should report 2 but not delete anything
+    n = rx.remove_by(filters={"project": "p1"}, dry_run=True)
+    assert n == 2
+
+    ids = {h["doc_id"] for h in rx.search("x", k=10)}
+    assert {str(d1), str(d2)}.issubset(ids)

@@ -36,10 +36,52 @@ from recollex.io import open_segment, write_segments, SQLiteMetadataStore
 from recollex.encoder.splade import SpladeEncoder
 from recollex.bitmaps import deserialize_bitmap_blob, TERM_PREFIX, TAG_PREFIX, LIVE_DOCS, TOMBSTONES
 
+
 def _has_only_everything(xs: Optional[Sequence[str]]) -> bool:
     if not xs:
         return False
     return all(str(x) == "everything" for x in xs)
+
+
+def _apply_project_to_filters(
+    project: Optional[str],
+    filters: Optional[Dict[str, str]],
+) -> Optional[Dict[str, str]]:
+    """
+    If project is provided, ensure filters['project'] is set (without overriding an explicit filter).
+    """
+    if project is None:
+        return filters
+    out = dict(filters or {})
+    out.setdefault("project", str(project))
+    return out
+
+
+def _tags_views(raw: Any) -> Tuple[List[str], Dict[str, str]]:
+    """
+    Normalize stored tags into:
+      - tags_list: list[str] of tag strings
+      - tags_dict: dict[str,str] parsed from 'k:v' entries in tags_list (last wins per key)
+    """
+    if raw is None:
+        return [], {}
+
+    if isinstance(raw, dict):
+        # Preserve original dict semantics: keys/values as-is
+        tags_list = [f"{k}:{v}" for k, v in raw.items()]
+    elif isinstance(raw, (list, tuple, set)):
+        # Already a collection of tag strings
+        tags_list = [str(t) for t in raw]
+    else:
+        # Unsupported/opaque type: no parsed tags
+        tags_list = []
+
+    tags_dict: Dict[str, str] = {}
+    for t in tags_list:
+        if ":" in t:
+            k, v = t.split(":", 1)
+            tags_dict[k] = v
+    return tags_list, tags_dict
 
 
 class Recollex:
@@ -183,7 +225,6 @@ class Recollex:
             for k, v in filters.items():
                 bm = self._get_bitmap(f"{TAG_PREFIX}{k}={v}")
                 base = bm if base is None else (base & bm)
-
 
         # all_of_tags: intersection
         if tags_all_of and not _has_only_everything(tags_all_of):
@@ -597,7 +638,7 @@ class Recollex:
 
         return {"n_docs": int(meta["n_rows"]), "nnz": int(meta["nnz"])}
 
-    def add(self, text_or_batch: Union[str, List[Any]], tags: Optional[Sequence[str]] = None, timestamp: Optional[int] = None) -> Union[int, List[int]]:
+    def add(self, text_or_batch: Union[str, List[Any]], tags: Optional[Union[Dict[str, Any], Sequence[str]]] = None, timestamp: Optional[int] = None) -> Union[int, List[int]]:
         # Batch mode: list means batch. Each item: (text, tags, timestamp) or {"text":..., "tags":..., "timestamp":...}
         if isinstance(text_or_batch, list):
             items = text_or_batch
@@ -610,16 +651,21 @@ class Recollex:
             for did, it, (idxs, vals) in zip(ids, items, encs):
                 if isinstance(it, dict):
                     text = it["text"]
-                    tags_i = it.get("tags") or []
+                    tags_i = it.get("tags")
                     ts = it.get("timestamp", it.get("seq", None))
                 else:
                     text, tags_i, ts = it
+                # Preserve dict tags as-is; normalize sequences to list[str]
+                if isinstance(tags_i, dict):
+                    tags_norm: Any = tags_i
+                else:
+                    tags_norm = list(tags_i or [])
                 docs.append({
                     "doc_id": did,
                     "indices": idxs,
                     "data": vals,
                     "text": text,
-                    "tags": list(tags_i or []),
+                    "tags": tags_norm,
                     "seq": (int(ts) if ts is not None else None),
                 })
             self.add_many(docs, segment_id=None, dims=enc.dims)
@@ -629,12 +675,18 @@ class Recollex:
         # Accept either plain string or a tuple like (text, tags?, timestamp?)
         if isinstance(text_or_batch, tuple):
             text = text_or_batch[0]
-            tags_local = list(text_or_batch[1]) if len(text_or_batch) > 1 else list(tags or [])
+            tags_i = text_or_batch[1] if len(text_or_batch) > 1 else tags
             ts_local = int(text_or_batch[2]) if len(text_or_batch) > 2 else (int(timestamp) if timestamp is not None else None)
         else:
             text = text_or_batch
-            tags_local = list(tags or [])
+            tags_i = tags
             ts_local = int(timestamp) if timestamp is not None else None
+
+        # Preserve dict tags; normalize sequences to list[str]
+        if isinstance(tags_i, dict):
+            tags_local = tags_i
+        else:
+            tags_local = list(tags_i or [])
 
         enc = self._ensure_encoder()
         idxs, vals = enc.encode(text)
@@ -849,11 +901,13 @@ class Recollex:
         one_of_tags: Optional[Sequence[str]] = None,
         none_of_tags: Optional[Sequence[str]] = None,
         dry_run: bool = False,
+        project: Optional[str] = None,
     ) -> int:
         """
         Remove all documents matching the provided scope (filters/tags).
         Returns the number of docs that would be (or were) removed.
         """
+        filters = _apply_project_to_filters(project, filters)
         base = self._build_base_bitmap(
             q_terms=[],
             exclude_doc_ids=None,
@@ -883,7 +937,8 @@ class Recollex:
         filters: Optional[Dict[str, str]] = None,             # legacy k=v
         tags_all_of: Optional[Sequence[str]] = None,          # new API
         tags_one_of: Optional[Sequence[str]] = None,          # new API
-        tags_none_of: Optional[Sequence[str]] = None,          # new API (NOT)
+        tags_none_of: Optional[Sequence[str]] = None,         # new API (NOT)
+        project: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         - Build base bitmap: filters ∩ ...  minus tombstones and exclude_doc_ids.
@@ -906,6 +961,7 @@ class Recollex:
                 )
 
         # Build base
+        filters = _apply_project_to_filters(project, filters)
         base = self._build_base_bitmap(
             q_terms=q_terms,
             exclude_doc_ids=exclude_doc_ids,
@@ -1042,6 +1098,10 @@ class Recollex:
             for seg_id, row_off, seq in merged:
                 did = index.get((seg_id, int(row_off)))
                 doc = doc_by_id.get(did) if did is not None else None
+                if doc is None:
+                    tags_list, tags_dict = [], {}
+                else:
+                    tags_list, tags_dict = _tags_views(doc.tags)
                 out.append({
                     "doc_id": did,
                     "segment_id": seg_id,
@@ -1049,7 +1109,9 @@ class Recollex:
                     "seq": int(seq),
                     "score": 0.0,
                     "text": None if doc is None else doc.text,
-                    "tags": None if doc is None else doc.tags,
+                    "tags": tags_list,
+                    "tags_list": tags_list,
+                    "tags_dict": tags_dict,
                 })
             return out
 
@@ -1085,6 +1147,10 @@ class Recollex:
         for seg_id, row_off, score in merged:
             did = index.get((seg_id, int(row_off)))
             doc = doc_by_id.get(did) if did is not None else None
+            if doc is None:
+                tags_list, tags_dict = [], {}
+            else:
+                tags_list, tags_dict = _tags_views(doc.tags)
             out.append({
                 "doc_id": did,
                 "segment_id": seg_id,
@@ -1092,7 +1158,9 @@ class Recollex:
                 "score": float(score),
                 "seq": None if doc is None else int(doc.seq),
                 "text": None if doc is None else doc.text,
-                "tags": None if doc is None else doc.tags,
+                "tags": tags_list,
+                "tags_list": tags_list,
+                "tags_dict": tags_dict,
             })
         return out
 
@@ -1108,6 +1176,7 @@ class Recollex:
         override_knobs: Optional[Dict[str, Any]] = None,
         rerank_top_m: Optional[int] = None,
         min_score: Optional[float] = None,
+        project: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         # Batch mode: list means batch
         if isinstance(text_or_texts, list):
@@ -1128,6 +1197,7 @@ class Recollex:
                     tags_all_of=all_of_tags,
                     tags_one_of=one_of_tags,
                     tags_none_of=none_of_tags,
+                    project=project,
                 ))
             return outs
 
@@ -1146,9 +1216,10 @@ class Recollex:
             tags_all_of=all_of_tags,
             tags_one_of=one_of_tags,
             tags_none_of=none_of_tags,
+            project=project,
         )
 
-    def last(self, filters: Optional[Dict[str, str]] = None, k: int = 50) -> List[Dict[str, Any]]:
+    def last(self, filters: Optional[Dict[str, str]] = None, k: int = 50, project: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Convenience for recency-first:
         Equivalent to search(q_terms=[], profile='recent', score noop, rank by seq desc).
@@ -1161,6 +1232,7 @@ class Recollex:
             override_knobs={},  # knobs unused for recent
             rerank_top_m=None,
             filters=filters,
+            project=project,
         )
 
     def close(self) -> None:

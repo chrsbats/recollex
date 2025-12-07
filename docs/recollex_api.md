@@ -23,12 +23,15 @@ API at a glance
 - Add (advanced, pre-encoded):
   - rx.add_many([{doc_id, indices, data, text?, tags?, seq?}, ...]) -> {"n_docs","nnz"}
 - Search:
-  - rx.search(text, k=50, all_of_tags=None, one_of_tags=None, none_of_tags=None, profile="rag", exclude_doc_ids=None, override_knobs=None, min_score=None) -> List[result]
+  - rx.search(text, k=50, all_of_tags=None, one_of_tags=None, none_of_tags=None,
+              profile="rag", exclude_doc_ids=None, override_knobs=None,
+              min_score=None, project=None) -> List[result]
   - rx.search([text, ...], ...) -> List[List[result]]  # same order as inputs
-  - rx.last(filters=None, k=50) -> List[result]  # recency shortcut
+  - rx.last(filters=None, k=50, project=None) -> List[result]  # recency shortcut
 - Remove:
   - rx.remove(id | [ids]) -> None  # accepts int or str; non-numeric values are ignored
-  - rx.remove_by(filters=None, all_of_tags=None, one_of_tags=None, none_of_tags=None, dry_run=False) -> int
+  - rx.remove_by(filters=None, all_of_tags=None, one_of_tags=None, none_of_tags=None,
+                 dry_run=False, project=None) -> int
     - Removes all docs matching the provided scope. Returns the count of removed docs.
     - dry_run=True returns the count without deleting.
 
@@ -39,7 +42,9 @@ Result object (dict)
 - score: float  # 0.0 for profile="recent"
 - seq: int | None
 - text: Optional[str]
-- tags: Optional[dict or list]  # matches how you added the doc
+- tags: list[str]              # canonical tag strings, e.g. ["project:local","doc_key:doc.123"]
+- tags_list: list[str]         # alias for tags
+- tags_dict: dict[str, str]    # parsed view from "k:v" tags, e.g. {"project":"local","doc_key":"doc.123"}
 
 Common tasks
 
@@ -92,7 +97,32 @@ hits = rx.search(
 )
 ```
 
-7) Most recent (recency‑first), optionally scoped
+7) Project/tenant scoping
+
+Project is a very common tag used for multi-tenant or per-project isolation. It is a convenience over a structured tag:
+
+- project="local" is equivalent to scoping by the tag {"project": "local"}.
+
+Examples:
+
+```python
+# Index docs with a project tag
+rx.add("Doc A", tags={"project": "local", "doc_key": "doc.1"}, timestamp=int(time.time()))
+rx.add("Doc B", tags={"project": "remote", "doc_key": "doc.2"}, timestamp=int(time.time())+1)
+
+# Search only within project="local"
+hits_local = rx.search("Doc", project="local", k=10)
+
+# Remove all docs for a given project
+removed = rx.remove_by(project="local")
+
+# Recent within a project
+recent_local = rx.last(filters=None, project="local", k=5)
+```
+
+Docs that use list-style tags like ["project:local", ...] are still supported, but the project= parameter is defined in terms of structured dict tags {"project": "..."}.
+
+8) Most recent (recency‑first), optionally scoped
 ```python
 recent = rx.search("", profile="recent", k=5)
 recent_scoped = rx.search("", profile="recent", all_of_tags=["tenant:acme"], k=5)
@@ -101,25 +131,33 @@ recent2 = rx.last(k=5)
 recent3 = rx.last(filters={"tenant":"acme"}, k=5)  # key=value scope (structured tags)
 ```
 
-8) Batch search
+9) Batch search
 ```python
 batches = rx.search(["redis", "postgres"], all_of_tags=["tenant:acme"], k=5)
 # batches[0] -> results for "redis"; batches[1] -> results for "postgres"
 ```
 
-9) Exclude specific doc_ids
+10) Exclude specific doc_ids
 ```python
 hits = rx.search("db", all_of_tags=["tenant:acme"], exclude_doc_ids=[str(did)], k=10)
 # accepts int or str; non-numeric values are ignored.
 ```
 
-10) Remove docs
+11) Remove docs
 ```python
 rx.remove(did)
 rx.remove([did1, did2, did3])
 # Remove by scope (tags/filters)
 n = rx.remove_by(all_of_tags=["tenant:acme"])        # remove all docs for tenant:acme
 m = rx.remove_by(filters={"tenant":"acme"}, dry_run=True)  # count only, no delete
+```
+
+For structured access to tags (e.g., project, doc_key), prefer tags_dict:
+
+```python
+for hit in hits:
+    project = hit["tags_dict"].get("project")
+    doc_key = hit["tags_dict"].get("doc_key")
 ```
 
 Recipes
@@ -135,8 +173,15 @@ Notes
   - profile="rag" → empty results.
   - profile="recent" → most recent (optionally scoped by tags).
 - Tags:
-  - add/search: use strings like "tenant:acme".
-  - add_many: pass dict for key=value style (becomes tag:tenant=acme).
+  - Tags are small labels, internally stored as strings like "key:value".
+  - Input:
+    - Preferred: dict {"project": "local", "doc_key": "doc.123"}.
+    - Also allowed: list of strings ["project:local", "doc_key:doc.123"].
+    - add_many: dict tags {"tenant":"acme","topic":"db"} become bitmaps like tag:tenant=acme.
+  - Output:
+    - tags: list[str] – canonical tag strings, e.g. ["project:local","doc_key:doc.123"].
+    - tags_list: list[str] – alias for tags.
+    - tags_dict: dict[str,str] – parsed from "k:v" entries in tags/tags_list.
   - Special: "everything" inside a tag list means “no restriction” for that list.
 - Exclusions: exclude_doc_ids accepts ints or strings; only numeric ids affect results; non-numeric values are ignored.
 - doc_id typing: search results expose doc_id as str; add() returns int ids; remove() accepts int or str (non-numeric values are ignored).

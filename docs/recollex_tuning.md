@@ -48,12 +48,20 @@ hits = rx.search("redis retry policy", k=20, profile="paraphrase_hp",
 
 # Recent with explicit budget (useful when excluding many ids)
 hits = rx.search("", profile="recent", k=50, override_knobs={"budget": 100})
+
+# Project/tenant scoping (common pattern)
+hits = rx.search("network timeout", project="acme", k=50)
+recent_acme = rx.last(project="acme", k=20)
+removed = rx.remove_by(project="acme", dry_run=True)  # count docs for a project
 ```
 
 Notes
 - Exclusions: exclude_doc_ids affects only numeric ids; non-numeric are ignored.
 - Tag scoping: all_of_tags (AND), one_of_tags (OR), none_of_tags (NOT).
   - The special "everything" in any tag list is treated as no restriction.
+- Project scoping:
+  - project="name" is a convenience for scoping by the structured tag {"project": "name"}.
+  - It is commonly used for multi-tenant or per-project isolation.
 
 k, score thresholds, and result shaping
 - There is no min_score parameter. Fetch a larger k and filter client-side:

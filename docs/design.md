@@ -381,7 +381,9 @@ results2 = engine.search_terms(
   profile="rag",
   filters={"tenant":"acme","user":"u123"}, # or tags_* scope
 )
-# -> [{"doc_id":..., "score":..., "segment_id":"seg_000","row_offset":1234, "tags":{...}, "text":"...", "seq": 123456}]
+# -> [{"doc_id":..., "score":..., "segment_id":"seg_000","row_offset":1234,
+#      "tags":["tenant:acme","user:u123"], "tags_dict":{"tenant":"acme","user":"u123"},
+#      "text":"...", "seq": 123456}]
 
 # Convenience for recency-first:
 recent = engine.last(filters={"tenant":"acme","user":"u123"}, k=50)

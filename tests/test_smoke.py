@@ -27,6 +27,18 @@ def test_smoke_batch_add_and_batch_search(index, now):
     assert all(isinstance(r, list) for r in res)
 
 
+def test_smoke_batch_search_handles_empty_strings(index, now):
+    index.add("foo", tags=["tenant:acme"], timestamp=now())
+
+    res = index.search(["foo", ""], k=5)
+    assert isinstance(res, list) and len(res) == 2
+    assert isinstance(res[0], list)
+    assert isinstance(res[1], list)
+    # For profile="rag", empty query should behave like a normal query over an empty string
+    # (current behavior: encoder still produces terms), so just assert it returns a list.
+    assert isinstance(res[1], list)
+
+
 def test_smoke_recent_profile(index, now):
     N = 5
     for i in range(N):
