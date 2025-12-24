@@ -27,10 +27,10 @@ API at a glance
               profile="rag", exclude_doc_ids=None, override_knobs=None,
               min_score=None, project=None) -> List[result]
   - rx.search([text, ...], ...) -> List[List[result]]  # same order as inputs
-  - rx.last(filters=None, k=50, project=None) -> List[result]  # recency shortcut
+  - rx.last(k=50, project=None) -> List[result]  # recency shortcut
 - Remove:
   - rx.remove(id | [ids]) -> None  # accepts int or str; non-numeric values are ignored
-  - rx.remove_by(filters=None, all_of_tags=None, one_of_tags=None, none_of_tags=None,
+  - rx.remove_by(all_of_tags=None, one_of_tags=None, none_of_tags=None,
                  dry_run=False, project=None) -> int
     - Removes all docs matching the provided scope. Returns the count of removed docs.
     - dry_run=True returns the count without deleting.
@@ -117,7 +117,7 @@ hits_local = rx.search("Doc", project="local", k=10)
 removed = rx.remove_by(project="local")
 
 # Recent within a project
-recent_local = rx.last(filters=None, project="local", k=5)
+recent_local = rx.last(project="local", k=5)
 ```
 
 Docs that use list-style tags like ["project:local", ...] are still supported, but the project= parameter is defined in terms of structured dict tags {"project": "..."}.
@@ -128,7 +128,7 @@ recent = rx.search("", profile="recent", k=5)
 recent_scoped = rx.search("", profile="recent", all_of_tags=["tenant:acme"], k=5)
 # Shortcut:
 recent2 = rx.last(k=5)
-recent3 = rx.last(filters={"tenant":"acme"}, k=5)  # key=value scope (structured tags)
+recent3 = rx.search("", profile="recent", all_of_tags=[("tenant", "acme")], k=5)
 ```
 
 9) Batch search
@@ -147,9 +147,10 @@ hits = rx.search("db", all_of_tags=["tenant:acme"], exclude_doc_ids=[str(did)], 
 ```python
 rx.remove(did)
 rx.remove([did1, did2, did3])
-# Remove by scope (tags/filters)
-n = rx.remove_by(all_of_tags=["tenant:acme"])        # remove all docs for tenant:acme
-m = rx.remove_by(filters={"tenant":"acme"}, dry_run=True)  # count only, no delete
+# Remove by scope (tags)
+n = rx.remove_by(all_of_tags=["tenant:acme"])  # remove all docs for tenant:acme
+# You can also use structured tags:
+m = rx.remove_by(all_of_tags=[("tenant", "acme")], dry_run=True)  # count only, no delete
 ```
 
 For structured access to tags (e.g., project, doc_key), prefer tags_dict:
@@ -175,14 +176,29 @@ Notes
 - Tags:
   - Tags are small labels, internally stored as strings like "key:value".
   - Input:
-    - Preferred: dict {"project": "local", "doc_key": "doc.123"}.
-    - Also allowed: list of strings ["project:local", "doc_key:doc.123"].
-    - add_many: dict tags {"tenant":"acme","topic":"db"} become bitmaps like tag:tenant=acme.
+    - Preferred (structured): dict `{"project": "local", "doc_key": "doc.123"}`.
+      - These become bitmaps like `tag:project=local`, `tag:doc_key=doc.123`.
+    - Also allowed (flat): list of strings `["project:local", "tenant:acme"]`.
+      - These become bitmaps like `tag:project:local`, `tag:tenant:acme`.
+    - `add_many`: dict tags `{"tenant":"acme","topic":"db"}` use the same `tag:key=value` form.
+  - Query (scoping) examples:
+    - Flat string tags:
+      ```python
+      rx.search("q", all_of_tags=["tenant:acme", "topic:db"])
+      rx.search("q", one_of_tags=["tenant:acme", "tenant:beta"])
+      rx.search("q", none_of_tags=["topic:internal"])
+      ```
+    - Structured key/value tags (tuple or single-entry dict):
+      ```python
+      rx.search("q", all_of_tags=[("tenant", "acme"), {"topic": "db"}])
+      rx.search("q", one_of_tags=[("tenant", "acme"), ("tenant", "beta")])
+      rx.search("q", none_of_tags=[{"topic": "internal"}])
+      ```
   - Output:
-    - tags: list[str] – canonical tag strings, e.g. ["project:local","doc_key:doc.123"].
-    - tags_list: list[str] – alias for tags.
-    - tags_dict: dict[str,str] – parsed from "k:v" entries in tags/tags_list.
-  - Special: "everything" inside a tag list means “no restriction” for that list.
+    - `tags`: `list[str]` – canonical tag strings, e.g. `["project:local","doc_key:doc.123"]`.
+    - `tags_list`: `list[str]` – alias for `tags`.
+    - `tags_dict`: `dict[str,str]` – parsed from `"k:v"` entries in `tags/tags_list`.
+  - Special: `"everything"` inside a tag list means “no restriction” for that list.
 - Exclusions: exclude_doc_ids accepts ints or strings; only numeric ids affect results; non-numeric values are ignored.
 - doc_id typing: search results expose doc_id as str; add() returns int ids; remove() accepts int or str (non-numeric values are ignored).
 - k defaults to 50; increase if you plan client‑side score thresholds or reordering.

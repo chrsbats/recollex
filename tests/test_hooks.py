@@ -66,6 +66,8 @@ from recollex.hooks import (
     filter_policy_default,
     candidate_supplier_default,
     score_accumulator,
+    _or_bitmaps,
+    _and_bitmaps,
 )
 
 def test_filter_policy_default_no_terms_returns_empty():
@@ -113,3 +115,59 @@ def test_score_accumulator_combines_weights_and_filters_rows():
     # row0: only term1 contributes 2.0*0.5 = 1.0
     # row2: only term2 contributes 1.0*3.0 = 3.0
     assert dd[0] == 1.0 and dd[2] == 3.0
+
+
+def test_or_and_bitmaps_empty_and_nonempty():
+    # Empty iterables should return empty Roaring
+    empty_or = _or_bitmaps([])
+    empty_and = _and_bitmaps([])
+    assert isinstance(empty_or, Roaring) and len(empty_or) == 0
+    assert isinstance(empty_and, Roaring) and len(empty_and) == 0
+
+    # Non-empty sanity
+    a = Roaring([1, 2])
+    b = Roaring([2, 3])
+    assert set(_or_bitmaps([a, b])) == {1, 2, 3}
+    assert set(_and_bitmaps([a, b])) == {2}
+
+
+def test_filter_policy_default_df_drop_top_percent_drops_terms():
+    # 3 terms, with artificial DF: tid 1: df=100, tid 2: df=10, tid 3: df=1
+    q_terms = [(1, 1.0), (2, 1.0), (3, 1.0)]
+    dfs = {1: 100, 2: 10, 3: 1}
+
+    def fake_get_df(tid: int) -> int:
+        return dfs.get(int(tid), 0)
+
+    # Drop top ~33% by DF: only tid 1 should be dropped, leaving {2,3}
+    must, should = filter_policy_default(
+        q_terms,
+        get_df=fake_get_df,
+        knobs={"df_drop_top_percent": 33.34, "min_must": 1, "should_cap": 10},
+    )
+    all_terms = set(must) | set(should)
+    assert 1 not in all_terms
+    assert {2, 3}.issubset(all_terms)
+
+
+def test_filter_policy_default_df_drop_all_returns_empty():
+    q_terms = [(1, 1.0)]
+
+    def fake_get_df(tid: int) -> int:
+        return 100
+
+    must, should = filter_policy_default(
+        q_terms,
+        get_df=fake_get_df,
+        knobs={"df_drop_top_percent": 100.0},
+    )
+    assert must == [] and should == []
+
+
+def test_candidate_supplier_recent_respects_budget():
+    base = Roaring(range(10))
+    from recollex.hooks import candidate_supplier_recent
+
+    out = candidate_supplier_recent(base, budget=3)
+    assert len(out) == 3
+    assert set(out).issubset(set(base))

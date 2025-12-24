@@ -77,7 +77,7 @@ def test_remove_by_dry_run_returns_count_without_deleting(tmp_path: Path):
     d2 = rx.add("x", tags={"project": "p1"}, timestamp=2)
 
     # Dry run should report 2 but not delete anything
-    n = rx.remove_by(filters={"project": "p1"}, dry_run=True)
+    n = rx.remove_by(all_of_tags=[{"project": "p1"}], dry_run=True)
     assert n == 2
 
     ids = {h["doc_id"] for h in rx.search("x", k=10)}

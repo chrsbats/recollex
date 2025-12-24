@@ -57,6 +57,28 @@ def _apply_project_to_filters(
     return out
 
 
+def _tag_bitmap_key(tag: Any) -> Optional[str]:
+    """
+    Normalize a tag spec into a TAG_PREFIX'ed bitmap name.
+
+    Supported forms:
+      - "tenant:acme"            -> "tag:tenant:acme"
+      - ("tenant", "acme")       -> "tag:tenant=acme"
+      - {"tenant": "acme"}       -> "tag:tenant=acme"
+      - "everything"             -> None (treated as no restriction)
+    """
+    if isinstance(tag, tuple) and len(tag) == 2:
+        k, v = tag
+        return f"{TAG_PREFIX}{k}={v}"
+    if isinstance(tag, dict) and len(tag) == 1:
+        (k, v), = tag.items()
+        return f"{TAG_PREFIX}{k}={v}"
+    s = str(tag)
+    if s == "everything":
+        return None
+    return f"{TAG_PREFIX}{s}"
+
+
 def _tags_views(raw: Any) -> Tuple[List[str], Dict[str, str]]:
     """
     Normalize stored tags into:
@@ -229,9 +251,10 @@ class Recollex:
         # all_of_tags: intersection
         if tags_all_of and not _has_only_everything(tags_all_of):
             for t in tags_all_of:
-                if str(t) == "everything":
+                key = _tag_bitmap_key(t)
+                if key is None:
                     continue
-                bm = self._get_bitmap(f"{TAG_PREFIX}{str(t)}")
+                bm = self._get_bitmap(key)
                 base = bm if base is None else (base & bm)
 
         # one_of_tags: union then intersect with base (if any)
@@ -239,9 +262,10 @@ class Recollex:
             union = Roaring()
             any_union = False
             for t in tags_one_of:
-                if str(t) == "everything":
+                key = _tag_bitmap_key(t)
+                if key is None:
                     continue
-                bm = self._get_bitmap(f"{TAG_PREFIX}{str(t)}")
+                bm = self._get_bitmap(key)
                 if bm:
                     union |= bm
                     any_union = True
@@ -265,9 +289,10 @@ class Recollex:
             if not _has_only_everything(tags_none_of):
                 excl = Roaring()
                 for t in tags_none_of:
-                    if str(t) == "everything":
+                    key = _tag_bitmap_key(t)
+                    if key is None:
                         continue
-                    bm = self._get_bitmap(f"{TAG_PREFIX}{str(t)}")
+                    bm = self._get_bitmap(key)
                     if bm:
                         excl |= bm
                 if excl:
@@ -896,7 +921,6 @@ class Recollex:
     def remove_by(
         self,
         *,
-        filters: Optional[Dict[str, str]] = None,
         all_of_tags: Optional[Sequence[str]] = None,
         one_of_tags: Optional[Sequence[str]] = None,
         none_of_tags: Optional[Sequence[str]] = None,
@@ -904,10 +928,10 @@ class Recollex:
         project: Optional[str] = None,
     ) -> int:
         """
-        Remove all documents matching the provided scope (filters/tags).
+        Remove all documents matching the provided scope (tags/project).
         Returns the number of docs that would be (or were) removed.
         """
-        filters = _apply_project_to_filters(project, filters)
+        filters = _apply_project_to_filters(project, None)
         base = self._build_base_bitmap(
             q_terms=[],
             exclude_doc_ids=None,
@@ -1219,7 +1243,7 @@ class Recollex:
             project=project,
         )
 
-    def last(self, filters: Optional[Dict[str, str]] = None, k: int = 50, project: Optional[str] = None) -> List[Dict[str, Any]]:
+    def last(self, k: int = 50, project: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Convenience for recency-first:
         Equivalent to search(q_terms=[], profile='recent', score noop, rank by seq desc).
@@ -1231,7 +1255,7 @@ class Recollex:
             exclude_doc_ids=None,
             override_knobs={},  # knobs unused for recent
             rerank_top_m=None,
-            filters=filters,
+            filters=None,
             project=project,
         )
 
