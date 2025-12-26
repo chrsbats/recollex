@@ -103,6 +103,19 @@ def test_remove_by_all_of_tags_kv_tuple_and_dict(tmp_path: Path):
     assert [int(r["doc_id"]) for r in res2] == [12]
 
 
+def test_remove_by_all_of_tags_single_dict(tmp_path: Path):
+    rx = Recollex.open(tmp_path / "idx_kv_allof_single_dict")
+    rx.add_many([
+        {"doc_id": 10, "indices": [], "data": [], "text": "x", "tags": {"tenant": "acme"}, "seq": 1},
+        {"doc_id": 11, "indices": [], "data": [], "text": "y", "tags": {"tenant": "acme"}, "seq": 2},
+        {"doc_id": 12, "indices": [], "data": [], "text": "z", "tags": {"tenant": "globex"}, "seq": 3},
+    ], dims=0)
+    n = rx.remove_by(all_of_tags={"tenant": "acme"})
+    assert n == 2
+    res = rx.search("", profile="recent", k=10)
+    assert [int(r["doc_id"]) for r in res] == [12]
+
+
 def test_remove_by_one_of_tags_kv_tuple_and_dict(tmp_path: Path):
     rx = Recollex.open(tmp_path / "idx_kv_oneof")
     rx.add_many([
@@ -129,6 +142,19 @@ def test_remove_by_one_of_tags_kv_tuple_and_dict(tmp_path: Path):
     assert [int(r["doc_id"]) for r in res2] == [12]
 
 
+def test_remove_by_one_of_tags_single_dict(tmp_path: Path):
+    rx = Recollex.open(tmp_path / "idx_kv_oneof_single_dict")
+    rx.add_many([
+        {"doc_id": 10, "indices": [], "data": [], "text": "x", "tags": {"tenant": "acme"}, "seq": 1},
+        {"doc_id": 11, "indices": [], "data": [], "text": "y", "tags": {"tenant": "globex"}, "seq": 2},
+        {"doc_id": 12, "indices": [], "data": [], "text": "z", "tags": {"tenant": "initech"}, "seq": 3},
+    ], dims=0)
+    n = rx.remove_by(one_of_tags={"tenant": "acme"})
+    assert n == 1
+    res = rx.search("", profile="recent", k=10)
+    assert [int(r["doc_id"]) for r in res] == [12, 11]
+
+
 def test_remove_by_none_of_tags_kv_tuple_and_dict(tmp_path: Path):
     rx = Recollex.open(tmp_path / "idx_kv_noneof")
     rx.add_many([
@@ -153,3 +179,16 @@ def test_remove_by_none_of_tags_kv_tuple_and_dict(tmp_path: Path):
     assert n2 == 2
     res2 = rx.search("", profile="recent", k=10)
     assert [int(r["doc_id"]) for r in res2] == [10]
+
+
+def test_remove_by_none_of_tags_single_dict(tmp_path: Path):
+    rx = Recollex.open(tmp_path / "idx_kv_noneof_single_dict")
+    rx.add_many([
+        {"doc_id": 10, "indices": [], "data": [], "text": "x", "tags": {"tenant": "acme"}, "seq": 1},
+        {"doc_id": 11, "indices": [], "data": [], "text": "y", "tags": {"tenant": "globex"}, "seq": 2},
+        {"doc_id": 12, "indices": [], "data": [], "text": "z", "tags": {"tenant": "initech"}, "seq": 3},
+    ], dims=0)
+    n = rx.remove_by(none_of_tags={"tenant": "acme"})
+    assert n == 2
+    res = rx.search("", profile="recent", k=10)
+    assert [int(r["doc_id"]) for r in res] == [10]

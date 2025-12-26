@@ -235,10 +235,17 @@ class Recollex:
         q_terms: Sequence[Tuple[int, float]],
         exclude_doc_ids: Optional[Iterable[str]],
         filters: Optional[Dict[str, str]] = None,
-        tags_all_of: Optional[Sequence[str]] = None,
-        tags_one_of: Optional[Sequence[str]] = None,
-        tags_none_of: Optional[Sequence[str]] = None,
+        tags_all_of: Optional[Sequence[Any]] = None,
+        tags_one_of: Optional[Sequence[Any]] = None,
+        tags_none_of: Optional[Sequence[Any]] = None,
     ) -> Roaring:
+        if isinstance(tags_all_of, dict):
+            tags_all_of = [tags_all_of]
+        if isinstance(tags_one_of, dict):
+            tags_one_of = [tags_one_of]
+        if isinstance(tags_none_of, dict):
+            tags_none_of = [tags_none_of]
+
         # Intersect/union tag bitmaps; support special 'none' (empty), and treat 'everything' as no restriction.
         base: Optional[Roaring] = None
         if filters:
@@ -1031,7 +1038,11 @@ class Recollex:
             def is_universe_scope() -> bool:
                 # Universe when there are no positive restrictions (filters/all_of/one_of),
                 # and none_of is empty or ["everything"].
-                has_positive = bool(filters) or bool(tags_all_of) or bool(tags_one_of)
+                has_positive = bool(filters)
+                if tags_all_of and not _has_only_everything(tags_all_of):
+                    has_positive = True
+                if tags_one_of and not _has_only_everything(tags_one_of):
+                    has_positive = True
                 none_restricts = bool(tags_none_of) and not _has_only_everything(tags_none_of)
                 return (not has_positive) and (not none_restricts)
 
