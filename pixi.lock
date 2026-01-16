@@ -5807,8 +5807,8 @@ packages:
   timestamp: 1734339765256
 - pypi: ./
   name: recollex-gpu
-  version: 0.1.6
-  sha256: a4594d4fb30ece0aec4625d8efa4541f7b401d287153dede0a522a3e1d0a341e
+  version: 0.1.7
+  sha256: 8c901871b7e7ec2e86d425d3f8603294dfc337d448b301d95e35a5a806a88ded
   requires_dist:
   - python-ulid>=3,<4
   - pyroaring>=1,<2
