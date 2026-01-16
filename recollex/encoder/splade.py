@@ -102,7 +102,13 @@ class SpladeEncoder:
         # Ensure local cache directory
         models_dir = Path("./models").resolve()
         models_dir.mkdir(parents=True, exist_ok=True)
-        local_path = models_dir / model.replace("/", "__")
+
+        model_path = Path(model)
+        if model_path.exists():
+            # If a file (e.g. /.../model.onnx) is supplied, use its parent as the model folder.
+            local_path = model_path.parent.resolve() if model_path.is_file() else model_path.resolve()
+        else:
+            local_path = models_dir / model.replace("/", "__")
 
         # Prefetch depending on backend; for ONNX, select precision unless provided
         mk: Optional[Dict[str, Any]] = model_kwargs
