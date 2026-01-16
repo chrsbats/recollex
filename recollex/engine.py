@@ -118,6 +118,7 @@ class Recollex:
         index_path: Union[str, Path],
         store: Optional[MetadataStore] = None,
         encoder_model: Optional[str] = None,
+        encoder: Optional[Any] = None,
         *,
         seg_cache_max: int = 64,
         csr_cache_max: int = 128,
@@ -153,7 +154,9 @@ class Recollex:
         if csr_ram_limit_bytes is not None:
             self._csr_cache["ram_limit_bytes"] = int(csr_ram_limit_bytes)
         self._encoder_model: Optional[str] = encoder_model
-        self._encoder: Optional[SpladeEncoder] = None  # lazy
+        # Allow injecting a ready-made encoder instance (public API).
+        # If encoder is None we keep lazy instantiation behavior.
+        self._encoder: Optional[Any] = encoder
 
     @classmethod
     def open(
@@ -161,6 +164,7 @@ class Recollex:
         index_path: Union[str, Path],
         store: Optional[MetadataStore] = None,
         encoder_model: Optional[str] = None,
+        encoder: Optional[Any] = None,
         *,
         seg_cache_max: int = 64,
         csr_cache_max: int = 128,
@@ -170,6 +174,7 @@ class Recollex:
             index_path,
             store,
             encoder_model,
+            encoder,
             seg_cache_max=seg_cache_max,
             csr_cache_max=csr_cache_max,
             csr_ram_limit_bytes=csr_ram_limit_bytes,
